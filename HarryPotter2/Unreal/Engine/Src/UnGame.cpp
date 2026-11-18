@@ -2279,6 +2279,12 @@ void UGameEngine::SaveGame( INT Position )
 {
 	guard(UGameEngine::SaveGame);
 
+	if( GLevel && GLevel->GetOuter() && (appStricmp(GLevel->GetOuter()->GetName(), TEXT("Startup")) == 0 || appStricmp(GLevel->GetOuter()->GetName(), TEXT("Entry")) == 0) )
+	{
+		debugf( NAME_Log, TEXT("Refusing to save system/movie level %s"), GLevel->GetOuter()->GetName() );
+		return;
+	}
+
 	TCHAR Filename[256];
 	GFileManager->MakeDirectory( *GSys->SavePath, 0 );
 	GFileManager->MakeDirectory( *GSys->SaveSlotPath, 0 );

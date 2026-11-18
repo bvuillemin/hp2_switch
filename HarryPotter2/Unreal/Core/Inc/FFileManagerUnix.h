@@ -308,9 +308,6 @@ public:
 		off_t Size=ftello(File);
 		if( Size < 0 || Size > (off_t)MAXINT || fseeko(File,0,SEEK_SET) != 0 )
 			{ fclose(File); return ReaderFailure(Filename,Flags,Error,TEXT("File exceeds the archive INT contract")); }
-#if defined(__SWITCH__)
-		setvbuf( File, NULL, _IOFBF, 64 * 1024 );
-#endif
 		return new(TEXT("UnixFileReader")) FArchiveFileReaderUnix(File,Error,Size);
 	}
 	FArchive* CreateFileWriter( const TCHAR* Filename, DWORD Flags=0, FOutputDevice* Error=GNull )

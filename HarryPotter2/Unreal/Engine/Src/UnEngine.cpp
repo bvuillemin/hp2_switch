@@ -104,12 +104,7 @@ void UEngine::Init()
 	// Subsystems.
 	FURL::StaticInit();
 	GEngineMem.Init( 65536, TEXT("GEngineMem") );
-#if defined(__SWITCH__)
-	INT EffectiveCache = Clamp(GIsClient ? (CacheSizeMegs > 256 ? CacheSizeMegs : 256) : 1, 1, 1024);
-	GCache.Init( 1024 * 1024 * EffectiveCache, 4096 );
-#else
 	GCache.Init( 1024 * 1024 * Clamp(GIsClient ? CacheSizeMegs : 1,1,1024), 4096 );
-#endif
 
 	// Translation.
 	YesKey = appToUpper( *Localize( "General", "Yes", TEXT("Core") ) );

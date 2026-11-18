@@ -623,12 +623,12 @@ UBOOL UXOpenGLRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT 
 	}
 
 	if (OpenGLVersion == GL_Core
-#if MACOSX
+#if MACOSX || defined(__SWITCH__)
 		&& 0
 #endif
 		)
 	{
-		// macOS performance tanks when we use these
+		// macOS and Switch Tegra X1 performance tanks or fails when we use these
 		UsingGeometryShaders = true;
 	}
 

@@ -5392,8 +5392,10 @@ static void MainLoopFrameCap( const FMainLoopState& S )
 	// Enforce optional maximum tick rate. A fixed-delta replay is driven
 	// by tick count, so it must not inherit the unfocused wall-clock cap.
 	FLOAT TargetTickRate = S.Engine->GetMaxTickRate();
+#if !defined(__SWITCH__)
 	if( S.FixedDeltaSeconds <= 0.0f && SDL_GetKeyboardFocus() == NULL )
 		TargetTickRate = TargetTickRate > 0.f ? Min( TargetTickRate, 10.f ) : 10.f;
+#endif
 	if( TargetTickRate > 0.f )
 		appSleep( Max( 0.f, (1.f / TargetTickRate) - (FLOAT)(appSeconds() - S.OldTime) ) );
 }
@@ -6423,19 +6425,43 @@ int main( int ArgC, char* ArgV[] )
 		std::string UserRoot = Bootstrap.SearchedRoot + "/User";
 		DiscoverSaves( UserRoot, DiscoveredSaves, SaveError );
 
+		auto IsValidGameSave = []( const std::string& SavePath ) -> bool
+		{
+			FILE* F = fopen( SavePath.c_str(), "rb" );
+			if( !F ) return false;
+			char Buf[8192];
+			size_t Read = fread( Buf, 1, sizeof(Buf), F );
+			fclose( F );
+			if( Read < 256 ) return false;
+			std::string Data( Buf, Read );
+			if( Data.find( "Startup" ) != std::string::npos || Data.find( "startup" ) != std::string::npos )
+				return false;
+			return true;
+		};
+
 		std::string LaunchPrefix;
-		if( !DiscoveredSaves.empty() )
+		bool FoundGoodSave = false;
+		for( const auto& Save : DiscoveredSaves )
 		{
-			const SaveRecord& Latest = DiscoveredSaves[0];
-			SwitchLog( "[SWITCH SAVE] Found %zu save(s). Continuing from %s (saveIndex=%d, slot=%d)...\n",
-				DiscoveredSaves.size(), Latest.displayName.c_str(), Latest.saveIndex, Latest.slot );
-			LaunchPrefix = "Startup.unr -LOAD=" + std::to_string(Latest.saveIndex);
-			if( Latest.usesSlotDirectory )
-				LaunchPrefix += " -SAVESLOT=" + std::to_string(Latest.slot);
+			if( IsValidGameSave( Save.savePath ) )
+			{
+				SwitchLog( "[SWITCH SAVE] Found valid save: %s (saveIndex=%d, slot=%d). Continuing...\n",
+					Save.displayName.c_str(), Save.saveIndex, Save.slot );
+				LaunchPrefix = "Startup.unr -LOAD=" + std::to_string(Save.saveIndex);
+				if( Save.usesSlotDirectory )
+					LaunchPrefix += " -SAVESLOT=" + std::to_string(Save.slot);
+				FoundGoodSave = true;
+				break;
+			}
+			else
+			{
+				SwitchLog( "[SWITCH SAVE] Skipping invalid/startup save: %s\n", Save.savePath.c_str() );
+			}
 		}
-		else
+
+		if( !FoundGoodSave )
 		{
-			SwitchLog( "[SWITCH SAVE] No saves found in '%s'. Starting New Game at PrivetDr.unr...\n", UserRoot.c_str() );
+			SwitchLog( "[SWITCH SAVE] No valid gameplay saves found. Starting New Game at PrivetDr.unr...\n" );
 			LaunchPrefix = "PrivetDr.unr -SAVESLOT=0";
 		}
 

@@ -425,9 +425,12 @@ void USDLViewport::UpdateInput( UBOOL Reset )
 	const s32 MOVE_DEADZONE = 8000;
 	const s32 CAM_DEADZONE = 4000;
 
-	// Are we in a menu / pause screen (cursor mode)?
-	if( !MouseIsGrabbed || bWindowsMouseAvailable )
+	const bool bInMenu = bShowWindowsMouse || !MouseIsGrabbed || bWindowsMouseAvailable || (Actor && Actor->bShowMenu) || (Actor && Actor->Level && Actor->Level->Pauser != TEXT(""));
+
+	if( bInMenu )
 	{
+		bWindowsMouseAvailable = 1;
+
 		// Center mouse initially if at origin
 		if( WindowsMouseX <= 0.0f && WindowsMouseY <= 0.0f )
 		{
@@ -458,33 +461,10 @@ void USDLViewport::UpdateInput( UBOOL Reset )
 			WindowsMouseY = Clamp( WindowsMouseY, 0.0f, (FLOAT)(SizeY > 0 ? SizeY : 768) );
 			if( C->Engine )
 				C->Engine->MousePosition( this, (kDown & (HidNpadButton_A | HidNpadButton_ZL)) ? 1 : 0, WindowsMouseX, WindowsMouseY );
-		}
 
-		// Touchscreen in menu
-		HidTouchScreenState touchState;
-		static bool s_TouchDown = false;
-		if( hidGetTouchScreenStates(&touchState, 1) > 0 )
-		{
-			if( touchState.count > 0 )
-			{
-				FLOAT scrW = (FLOAT)(SizeX > 0 ? SizeX : 1024);
-				FLOAT scrH = (FLOAT)(SizeY > 0 ? SizeY : 768);
-				WindowsMouseX = (FLOAT)touchState.touches[0].x * (scrW / 1280.0f);
-				WindowsMouseY = (FLOAT)touchState.touches[0].y * (scrH / 720.0f);
-				if( C->Engine )
-					C->Engine->MousePosition( this, 1, WindowsMouseX, WindowsMouseY );
-
-				if( !s_TouchDown )
-				{
-					s_TouchDown = true;
-					CauseInputEvent( IK_LeftMouse, IST_Press, 0.f );
-				}
-			}
-			else if( s_TouchDown )
-			{
-				s_TouchDown = false;
-				CauseInputEvent( IK_LeftMouse, IST_Release, 0.f );
-			}
+			// Also send mouse deltas so menus polling relative input track the motion
+			CauseInputEvent( IK_MouseX, IST_Axis, curDeltaX * CursorSpeed );
+			CauseInputEvent( IK_MouseY, IST_Axis, -curDeltaY * CursorSpeed );
 		}
 
 		// Release any gameplay movement keys if menu was opened while moving
