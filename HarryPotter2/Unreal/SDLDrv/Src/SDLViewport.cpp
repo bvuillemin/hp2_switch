@@ -209,8 +209,12 @@ UBOOL USDLViewport::ResizeViewport( DWORD BlitType, INT NewX, INT NewY, INT NewC
 #if defined(__EMSCRIPTEN__)
 	BrowserCanvasSize( SizeX, SizeY );
 #endif
+#if defined(__SWITCH__)
+	ColorBytes = 4;
+#else
 	if( NewColorBytes != INDEX_NONE )
 		ColorBytes = Clamp( NewColorBytes, 2, 4 );
+#endif
 
 	if( SdlWindow )
 	{
@@ -280,6 +284,13 @@ void USDLViewport::OpenWindow( DWORD ParentWindow, UBOOL Temporary, INT NewX, IN
 	(void)ParentHandle;
 	INT Width  = NewX != INDEX_NONE ? NewX : (OpenX != INDEX_NONE ? OpenX : C->WindowedViewportX);
 	INT Height = NewY != INDEX_NONE ? NewY : (OpenY != INDEX_NONE ? OpenY : C->WindowedViewportY);
+#if defined(__SWITCH__)
+	if( (Width == 1024 && Height == 768) || Width <= 0 || Height <= 0 )
+	{
+		Width = 1280;
+		Height = 720;
+	}
+#endif
 #if defined(__EMSCRIPTEN__)
 	BrowserCanvasSize( Width, Height );
 #endif
@@ -326,7 +337,11 @@ void USDLViewport::OpenWindow( DWORD ParentWindow, UBOOL Temporary, INT NewX, IN
 
 	SizeX = Width;
 	SizeY = Height;
+#if defined(__SWITCH__)
+	ColorBytes = 4;
+#else
 	ColorBytes = C->WindowedColorBits <= 16 ? 2 : 4;
+#endif
 	BlitFlags &= ~BLIT_Fullscreen;
 	if( C->StartupFullscreen || C->UseDesktopResolution )
 	{
@@ -459,10 +474,24 @@ void USDLViewport::UpdateInput( UBOOL Reset )
 			*pMouseY = WinHeight * 0.5f;
 		}
 
+		// Ensure FESoundVideoPage.IsSupportedResolution allows widescreen resolutions
+		static bool s_PatchedIsSupportedRes = false;
+		if( !s_PatchedIsSupportedRes )
+		{
+			UFunction* Fn = (UFunction*)UObject::StaticFindObject( UFunction::StaticClass(), ANY_PACKAGE, TEXT("IsSupportedResolution") );
+			if( Fn && Fn->Script.Num() >= 2 )
+			{
+				Fn->Script(0) = EX_Return;
+				Fn->Script(1) = EX_True;
+				s_PatchedIsSupportedRes = true;
+				debugf( TEXT("Patched FESoundVideoPage.IsSupportedResolution to allow widescreen resolutions") );
+			}
+		}
+
 		if( WindowsMouseX <= 0.0f && WindowsMouseY <= 0.0f )
 		{
-			WindowsMouseX = (FLOAT)(SizeX > 0 ? SizeX : 1024) * 0.5f;
-			WindowsMouseY = (FLOAT)(SizeY > 0 ? SizeY : 768) * 0.5f;
+			WindowsMouseX = (FLOAT)(SizeX > 0 ? SizeX : 1280) * 0.5f;
+			WindowsMouseY = (FLOAT)(SizeY > 0 ? SizeY : 720) * 0.5f;
 		}
 
 		// Both Left and Right sticks can move the cursor in menu
@@ -492,8 +521,8 @@ void USDLViewport::UpdateInput( UBOOL Reset )
 
 			WindowsMouseX += curDeltaX * (CursorSpeed * 1.5f);
 			WindowsMouseY -= curDeltaY * (CursorSpeed * 1.5f);
-			WindowsMouseX = Clamp( WindowsMouseX, 0.0f, (FLOAT)(SizeX > 0 ? SizeX : 1024) );
-			WindowsMouseY = Clamp( WindowsMouseY, 0.0f, (FLOAT)(SizeY > 0 ? SizeY : 768) );
+			WindowsMouseX = Clamp( WindowsMouseX, 0.0f, (FLOAT)(SizeX > 0 ? SizeX : 1280) );
+			WindowsMouseY = Clamp( WindowsMouseY, 0.0f, (FLOAT)(SizeY > 0 ? SizeY : 720) );
 			if( C->Engine )
 				C->Engine->MousePosition( this, (kDown & (HidNpadButton_A | HidNpadButton_ZL)) ? 1 : 0, WindowsMouseX, WindowsMouseY );
 
@@ -860,19 +889,68 @@ const TCHAR* USDLViewport::GetLocalizedKeyName( EInputKey Key ) const
 UBOOL USDLViewport::Exec( const TCHAR* Cmd, FOutputDevice& Ar )
 {
 	guard(USDLViewport::Exec);
-	if( ParseCommand(&Cmd,TEXT("GETRES")) || ParseCommand(&Cmd,TEXT("GETCURRENTRES")) )
+	if( ParseCommand(&Cmd,TEXT("GETCURRENTRES")) )
 	{
-		Ar.Logf( TEXT("%i %i %i"), SizeX, SizeY, ColorBytes );
+		Ar.Logf( TEXT("%ix%i"), SizeX, SizeY );
 		return 1;
 	}
-	else if( ParseCommand(&Cmd,TEXT("GETCURRENTCOLORDEPTH")) )
+	else if( ParseCommand(&Cmd,TEXT("GETCURRENTCOLORDEPTH")) || ParseCommand(&Cmd,TEXT("GETCURRENTBITDEPTH")) )
 	{
-		Ar.Logf( TEXT("%i"), ColorBytes );
+		Ar.Logf( TEXT("%i"), (ColorBytes ? ColorBytes : 4) * 8 );
 		return 1;
 	}
-	else if( ParseCommand(&Cmd,TEXT("GETCURRENTBITDEPTH")) )
+	else if( ParseCommand(&Cmd,TEXT("GETCOLORDEPTHS")) )
 	{
-		Ar.Logf( TEXT("%i"), ColorBytes * 8 );
+#if defined(__SWITCH__)
+		Ar.Log( TEXT("32") );
+#else
+		Ar.Log( TEXT("16 32") );
+#endif
+		return 1;
+	}
+	else if( ParseCommand(&Cmd,TEXT("GETRES")) )
+	{
+#if defined(__SWITCH__)
+		Ar.Log( TEXT("1280x720 1920x1080 1024x768 800x600 640x480") );
+#else
+		Ar.Log( TEXT("640x480 800x600 1024x768 1280x720 1280x1024 1920x1080") );
+#endif
+		return 1;
+	}
+	else if( ParseCommand(&Cmd,TEXT("SETRES")) )
+	{
+		INT X = appAtoi(Cmd);
+		const TCHAR* CmdTemp = appStrchr(Cmd,'x') ? appStrchr(Cmd,'x')+1 : appStrchr(Cmd,'X') ? appStrchr(Cmd,'X')+1 : TEXT("");
+		INT Y = appAtoi(CmdTemp);
+		Cmd = CmdTemp;
+		CmdTemp = appStrchr(Cmd,'x') ? appStrchr(Cmd,'x')+1 : appStrchr(Cmd,'X') ? appStrchr(Cmd,'X')+1 : TEXT("");
+		INT C = appAtoi(CmdTemp);
+#if defined(__SWITCH__)
+		INT NewColorBytes = 4;
+#else
+		INT NewColorBytes = C ? C/8 : ColorBytes;
+#endif
+		if( X && Y && RenDev )
+		{
+			UBOOL Result = RenDev->SetRes( X, Y, NewColorBytes, IsFullscreen() );
+			if( Result )
+			{
+				USDLClient* Client = GetOuterUSDLClient();
+				if( IsFullscreen() )
+				{
+					Client->FullscreenViewportX = X;
+					Client->FullscreenViewportY = Y;
+					Client->FullscreenColorBits = NewColorBytes * 8;
+				}
+				else
+				{
+					Client->WindowedViewportX = X;
+					Client->WindowedViewportY = Y;
+					Client->WindowedColorBits = NewColorBytes * 8;
+				}
+				Client->SaveConfig();
+			}
+		}
 		return 1;
 	}
 	else if( ParseCommand(&Cmd,TEXT("TOGGLEFULLSCREEN")) )

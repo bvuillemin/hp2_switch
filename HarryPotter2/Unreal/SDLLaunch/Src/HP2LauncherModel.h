@@ -84,8 +84,13 @@ struct DataSourceOption
 
 struct DisplayResolution
 {
+#if defined(__SWITCH__)
+	int width = 1280;
+	int height = 720;
+#else
 	int width = 800;
 	int height = 600;
+#endif
 	std::string label;
 };
 inline constexpr std::array<double, 5> RenderScaleValues = {{0.50, 0.67, 0.75, 0.85, 1.00}};

@@ -677,6 +677,26 @@ void ApplyPortableConfig()
 		GConfig->SetString( TEXT("Engine.Engine"), TEXT("AudioDevice"), TEXT("ALAudio.ALAudioSubsystem"), TEXT("System") );
 		debugf( NAME_Init, TEXT("Migrated [Engine.Engine] AudioDevice=%s to ALAudio.ALAudioSubsystem"), Current );
 	}
+
+#if defined(__SWITCH__)
+	INT ResX = 0, ResY = 0;
+	if( GConfig->GetString( TEXT("SDLDrv.SDLClient"), TEXT("WindowedViewportX"), Current, ARRAY_COUNT(Current), TEXT("System") ) )
+		ResX = appAtoi( Current );
+	if( GConfig->GetString( TEXT("SDLDrv.SDLClient"), TEXT("WindowedViewportY"), Current, ARRAY_COUNT(Current), TEXT("System") ) )
+		ResY = appAtoi( Current );
+
+	// If resolution is missing or standard 4:3 (1024x768, 800x600, 640x480), migrate to Switch 1280x720 16:9
+	if( ResX == 0 || ResY == 0 || (ResX == 1024 && ResY == 768) || (ResX == 800 && ResY == 600) || (ResX == 640 && ResY == 480) )
+	{
+		GConfig->SetString( TEXT("SDLDrv.SDLClient"), TEXT("WindowedViewportX"), TEXT("1280"), TEXT("System") );
+		GConfig->SetString( TEXT("SDLDrv.SDLClient"), TEXT("WindowedViewportY"), TEXT("720"), TEXT("System") );
+		GConfig->SetString( TEXT("SDLDrv.SDLClient"), TEXT("FullscreenViewportX"), TEXT("1280"), TEXT("System") );
+		GConfig->SetString( TEXT("SDLDrv.SDLClient"), TEXT("FullscreenViewportY"), TEXT("720"), TEXT("System") );
+		GConfig->SetString( TEXT("SDLDrv.SDLClient"), TEXT("WindowedColorBits"), TEXT("32"), TEXT("System") );
+		GConfig->SetString( TEXT("SDLDrv.SDLClient"), TEXT("FullscreenColorBits"), TEXT("32"), TEXT("System") );
+		debugf( NAME_Init, TEXT("Migrated [SDLDrv.SDLClient] resolution to 1280x720 32-bit for Nintendo Switch") );
+	}
+#endif
 }
 
 /*-----------------------------------------------------------------------------

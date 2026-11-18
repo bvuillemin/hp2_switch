@@ -56,12 +56,21 @@ void USDLClient::StaticConstructor()
 	new(GetClass(),TEXT("UIScale"),				RF_Public)UFloatProperty(CPP_PROPERTY(UIScale               ), TEXT("Display"),  CPF_Config );
 
 	// Pinned model defaults; configuration overrides them at load time.
+#if defined(__SWITCH__)
+	WindowedViewportX		= 1280;
+	WindowedViewportY		= 720;
+	WindowedColorBits		= 32;
+	FullscreenViewportX	= 1280;
+	FullscreenViewportY	= 720;
+	FullscreenColorBits	= 32;
+#else
 	WindowedViewportX		= 1024;
 	WindowedViewportY		= 768;
 	WindowedColorBits		= 32;
 	FullscreenViewportX	= 1024;
 	FullscreenViewportY	= 768;
 	FullscreenColorBits	= 32;
+#endif
 	Brightness				= 0.5f;
 	CaptureMouse				= 1;
 	ScreenFlashes				= 1;

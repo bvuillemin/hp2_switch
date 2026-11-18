@@ -2696,7 +2696,11 @@ std::vector<LegacySettingValue> MigrateLegacySettings(
 		const bool fullSize = borderlessDesktop || startupFullscreen;
 		const char* widthKey = fullSize ? "FullscreenViewportX" : "WindowedViewportX";
 		const char* heightKey = fullSize ? "FullscreenViewportY" : "WindowedViewportY";
+#if defined(__SWITCH__)
+		int width = 1280, height = 720;
+#else
 		int width = 800, height = 600;
+#endif
 		int parsedDimension;
 		if (MigrationFinalValue(values, "SDLDrv.SDLClient", widthKey, text) &&
 			Integer(text, parsedDimension) && parsedDimension >= 320 && parsedDimension <= 16384)
