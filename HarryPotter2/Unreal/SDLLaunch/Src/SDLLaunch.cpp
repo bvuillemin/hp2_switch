@@ -6215,6 +6215,9 @@ static int HP2BootAfterLauncher(
 			return 0;
 		}
 #endif
+#if defined(__SWITCH__)
+		appletSetCpuBoostMode( ApmCpuBoostMode_Normal );
+#endif
 		if( !GIsRequestingExit )
 			MainLoop( Engine, Max( 0, TestTicks ), FixedDeltaSeconds, LifecycleReporter.get(), WorldCollisionReporter.get(), StaticBspProbe.get() );
 		ClearTraceReporterGlobals();
@@ -6299,6 +6302,9 @@ static void SwitchMainThread( void* Arg )
 {
 	FSwitchMainArgs* Args = (FSwitchMainArgs*)Arg;
 	SwitchLog( "[SWITCH THREAD] Entered 16MB Game Thread!\n" );
+#if defined(__SWITCH__)
+	appletSetCpuBoostMode( ApmCpuBoostMode_FastLoad );
+#endif
 	Args->Result = RealMain( Args->ArgC, Args->ArgV );
 	SwitchLog( "[SWITCH THREAD] Exiting 16MB Game Thread with result %d.\n", Args->Result );
 }

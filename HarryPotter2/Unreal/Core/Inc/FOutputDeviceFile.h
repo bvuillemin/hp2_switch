@@ -50,7 +50,11 @@ public:
 					}
 
 					// Open log file.
+#if defined(__SWITCH__)
+					LogAr = GFileManager->CreateFileWriter( Filename, FILEWRITE_AllowRead|(Opened?FILEWRITE_Append:0));
+#else
 					LogAr = GFileManager->CreateFileWriter( Filename, FILEWRITE_AllowRead|FILEWRITE_Unbuffered|(Opened?FILEWRITE_Append:0));
+#endif
 					if( LogAr )
 					{
 						Opened = 1;

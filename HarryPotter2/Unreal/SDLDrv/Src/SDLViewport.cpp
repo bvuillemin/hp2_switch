@@ -419,56 +419,129 @@ void USDLViewport::UpdateInput( UBOOL Reset )
 	HandleBtn( HidNpadButton_StickL, IK_Shift ); // Walk / Sneak
 	HandleBtn( HidNpadButton_StickR, IK_Alt );   // Free look / center
 
-	// Left stick for movement (forward, backward, strafe left and right -> W, S, A, D)
 	HidAnalogStickState l_stick = padGetStickPos( &s_SwitchPad, 0 );
-	const s32 MOVE_DEADZONE = 8000;
-	bool curW = (l_stick.y > MOVE_DEADZONE);
-	bool curS = (l_stick.y < -MOVE_DEADZONE);
-	bool curA = (l_stick.x < -MOVE_DEADZONE);
-	bool curD = (l_stick.x > MOVE_DEADZONE);
-
-	if( curW != s_PrevW )
-	{
-		CauseInputEvent( IK_W, curW ? IST_Press : IST_Release, 0.f );
-		s_PrevW = curW;
-	}
-	if( curS != s_PrevS )
-	{
-		CauseInputEvent( IK_S, curS ? IST_Press : IST_Release, 0.f );
-		s_PrevS = curS;
-	}
-	if( curA != s_PrevA )
-	{
-		CauseInputEvent( IK_A, curA ? IST_Press : IST_Release, 0.f );
-		s_PrevA = curA;
-	}
-	if( curD != s_PrevD )
-	{
-		CauseInputEvent( IK_D, curD ? IST_Press : IST_Release, 0.f );
-		s_PrevD = curD;
-	}
-
-	// Right stick for camera movement (Mouse look)
 	HidAnalogStickState r_stick = padGetStickPos( &s_SwitchPad, 1 );
+
+	const s32 MOVE_DEADZONE = 8000;
 	const s32 CAM_DEADZONE = 4000;
-	FLOAT camDeltaX = 0.f;
-	FLOAT camDeltaY = 0.f;
-	if( r_stick.x > CAM_DEADZONE || r_stick.x < -CAM_DEADZONE )
+
+	// Are we in a menu / pause screen (cursor mode)?
+	if( !MouseIsGrabbed || bWindowsMouseAvailable )
 	{
-		FLOAT raw = (r_stick.x > 0) ? (r_stick.x - CAM_DEADZONE) : (r_stick.x + CAM_DEADZONE);
-		FLOAT norm = raw / (32767.f - CAM_DEADZONE);
-		camDeltaX = norm * 20.0f;
+		// Center mouse initially if at origin
+		if( WindowsMouseX <= 0.0f && WindowsMouseY <= 0.0f )
+		{
+			WindowsMouseX = (FLOAT)(SizeX > 0 ? SizeX : 1024) * 0.5f;
+			WindowsMouseY = (FLOAT)(SizeY > 0 ? SizeY : 768) * 0.5f;
+		}
+
+		// Both Left and Right sticks can move the cursor in menu
+		FLOAT curDeltaX = 0.f;
+		FLOAT curDeltaY = 0.f;
+
+		if( r_stick.x > CAM_DEADZONE || r_stick.x < -CAM_DEADZONE )
+			curDeltaX = (FLOAT)r_stick.x / 32767.f;
+		else if( l_stick.x > MOVE_DEADZONE || l_stick.x < -MOVE_DEADZONE )
+			curDeltaX = (FLOAT)l_stick.x / 32767.f;
+
+		if( r_stick.y > CAM_DEADZONE || r_stick.y < -CAM_DEADZONE )
+			curDeltaY = (FLOAT)r_stick.y / 32767.f;
+		else if( l_stick.y > MOVE_DEADZONE || l_stick.y < -MOVE_DEADZONE )
+			curDeltaY = (FLOAT)l_stick.y / 32767.f;
+
+		if( curDeltaX != 0.f || curDeltaY != 0.f )
+		{
+			const FLOAT CursorSpeed = 14.0f;
+			WindowsMouseX += curDeltaX * CursorSpeed;
+			WindowsMouseY -= curDeltaY * CursorSpeed; // Stick UP moves cursor UP (decrease Y)
+			WindowsMouseX = Clamp( WindowsMouseX, 0.0f, (FLOAT)(SizeX > 0 ? SizeX : 1024) );
+			WindowsMouseY = Clamp( WindowsMouseY, 0.0f, (FLOAT)(SizeY > 0 ? SizeY : 768) );
+			if( C->Engine )
+				C->Engine->MousePosition( this, (kDown & (HidNpadButton_A | HidNpadButton_ZL)) ? 1 : 0, WindowsMouseX, WindowsMouseY );
+		}
+
+		// Touchscreen in menu
+		HidTouchScreenState touchState;
+		static bool s_TouchDown = false;
+		if( hidGetTouchScreenStates(&touchState, 1) > 0 )
+		{
+			if( touchState.count > 0 )
+			{
+				FLOAT scrW = (FLOAT)(SizeX > 0 ? SizeX : 1024);
+				FLOAT scrH = (FLOAT)(SizeY > 0 ? SizeY : 768);
+				WindowsMouseX = (FLOAT)touchState.touches[0].x * (scrW / 1280.0f);
+				WindowsMouseY = (FLOAT)touchState.touches[0].y * (scrH / 720.0f);
+				if( C->Engine )
+					C->Engine->MousePosition( this, 1, WindowsMouseX, WindowsMouseY );
+
+				if( !s_TouchDown )
+				{
+					s_TouchDown = true;
+					CauseInputEvent( IK_LeftMouse, IST_Press, 0.f );
+				}
+			}
+			else if( s_TouchDown )
+			{
+				s_TouchDown = false;
+				CauseInputEvent( IK_LeftMouse, IST_Release, 0.f );
+			}
+		}
+
+		// Release any gameplay movement keys if menu was opened while moving
+		if( s_PrevW ) { CauseInputEvent( IK_W, IST_Release, 0.f ); s_PrevW = false; }
+		if( s_PrevS ) { CauseInputEvent( IK_S, IST_Release, 0.f ); s_PrevS = false; }
+		if( s_PrevA ) { CauseInputEvent( IK_A, IST_Release, 0.f ); s_PrevA = false; }
+		if( s_PrevD ) { CauseInputEvent( IK_D, IST_Release, 0.f ); s_PrevD = false; }
 	}
-	if( r_stick.y > CAM_DEADZONE || r_stick.y < -CAM_DEADZONE )
+	else
 	{
-		FLOAT raw = (r_stick.y > 0) ? (r_stick.y - CAM_DEADZONE) : (r_stick.y + CAM_DEADZONE);
-		FLOAT norm = raw / (32767.f - CAM_DEADZONE);
-		camDeltaY = norm * 20.0f;
+		// Left stick for movement (forward, backward, strafe left and right -> W, S, A, D)
+		bool curW = (l_stick.y > MOVE_DEADZONE);
+		bool curS = (l_stick.y < -MOVE_DEADZONE);
+		bool curA = (l_stick.x < -MOVE_DEADZONE);
+		bool curD = (l_stick.x > MOVE_DEADZONE);
+
+		if( curW != s_PrevW )
+		{
+			CauseInputEvent( IK_W, curW ? IST_Press : IST_Release, 0.f );
+			s_PrevW = curW;
+		}
+		if( curS != s_PrevS )
+		{
+			CauseInputEvent( IK_S, curS ? IST_Press : IST_Release, 0.f );
+			s_PrevS = curS;
+		}
+		if( curA != s_PrevA )
+		{
+			CauseInputEvent( IK_A, curA ? IST_Press : IST_Release, 0.f );
+			s_PrevA = curA;
+		}
+		if( curD != s_PrevD )
+		{
+			CauseInputEvent( IK_D, curD ? IST_Press : IST_Release, 0.f );
+			s_PrevD = curD;
+		}
+
+		// Right stick for camera movement (Mouse look)
+		FLOAT camDeltaX = 0.f;
+		FLOAT camDeltaY = 0.f;
+		if( r_stick.x > CAM_DEADZONE || r_stick.x < -CAM_DEADZONE )
+		{
+			FLOAT raw = (r_stick.x > 0) ? (r_stick.x - CAM_DEADZONE) : (r_stick.x + CAM_DEADZONE);
+			FLOAT norm = raw / (32767.f - CAM_DEADZONE);
+			camDeltaX = norm * 20.0f;
+		}
+		if( r_stick.y > CAM_DEADZONE || r_stick.y < -CAM_DEADZONE )
+		{
+			FLOAT raw = (r_stick.y > 0) ? (r_stick.y - CAM_DEADZONE) : (r_stick.y + CAM_DEADZONE);
+			FLOAT norm = raw / (32767.f - CAM_DEADZONE);
+			camDeltaY = norm * 20.0f;
+		}
+		if( camDeltaX != 0.f )
+			CauseInputEvent( IK_MouseX, IST_Axis, camDeltaX );
+		if( camDeltaY != 0.f )
+			CauseInputEvent( IK_MouseY, IST_Axis, camDeltaY );
 	}
-	if( camDeltaX != 0.f )
-		CauseInputEvent( IK_MouseX, IST_Axis, camDeltaX );
-	if( camDeltaY != 0.f )
-		CauseInputEvent( IK_MouseY, IST_Axis, camDeltaY );
 #endif
 
 	// Relative mouse deltas are sampled once per pump while grabbed.

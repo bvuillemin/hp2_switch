@@ -1426,9 +1426,9 @@ void UXOpenGLRenderDevice::SwapControl()
 	case VS_Adaptive:
 		if (!XOpenGLSetSwapInterval(-1))
         {
-			debugf(NAME_Init, TEXT("XOpenGL: Setting VSync adaptive has failed. Falling back to SwapInterval 0 (VSync Off)."));
-			if (!XOpenGLSetSwapInterval(0))
-                debugf(NAME_Init, TEXT("XOpenGL: Setting VSync off has failed."));
+			debugf(NAME_Init, TEXT("XOpenGL: Setting VSync adaptive has failed. Falling back to SwapInterval 1 (VSync On)."));
+			if (!XOpenGLSetSwapInterval(1))
+                debugf(NAME_Init, TEXT("XOpenGL: Setting VSync on has failed."));
         }
 		else
         {

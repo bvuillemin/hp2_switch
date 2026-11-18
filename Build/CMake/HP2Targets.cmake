@@ -382,12 +382,13 @@ elseif(SWITCH)
     )
     nx_generate_nacp(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/HarryPotter2.nacp"
         NAME "Harry Potter and the Chamber of Secrets"
-        AUTHOR "KnowWonder / EA / hp2_switch"
+        AUTHOR "the_deshpande"
         VERSION "1.0.0"
     )
     nx_create_nro(HarryPotter2
         TARGET hp2_game
         NACP "${CMAKE_CURRENT_BINARY_DIR}/HarryPotter2.nacp"
+        ICON "${CMAKE_CURRENT_SOURCE_DIR}/Build/Switch/icon.jpg"
     )
 else()
     find_package(Threads REQUIRED)
