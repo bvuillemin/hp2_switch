@@ -2044,6 +2044,29 @@ void UGameEngine::Tick( FLOAT DeltaSeconds )
 	}
 	unguard;
 
+#if defined(__SWITCH__)
+	static bool s_InitialSaveDone = false;
+	if( !s_InitialSaveDone && GLevel && GLevel->TimeSeconds > 2.0f && Client && Client->Viewports.Num() )
+	{
+		const TCHAR* MapOuterName = GLevel->GetOuter()->GetName();
+		if( appStricmp(MapOuterName, TEXT("Entry")) != 0 && appStricmp(MapOuterName, TEXT("Startup")) != 0 )
+		{
+			s_InitialSaveDone = true;
+			TCHAR InitialSavePath[256];
+			appSprintf( InitialSavePath, TEXT("%s") PATH_SEPARATOR TEXT("Save0.usa"), *GSys->SaveSlotPath );
+			if( GFileManager->FileSize(InitialSavePath) <= 0 )
+			{
+				APlayerPawn* InitialPlayer = Client->Viewports(0)->Actor;
+				if( InitialPlayer )
+				{
+					debugf( NAME_Log, TEXT("[SWITCH AUTO-SAVE] No save exists yet. Queuing initial game save for: %s"), InitialSavePath );
+					InitialPlayer->bQueuedToSaveGame = true;
+				}
+			}
+		}
+	}
+#endif
+
 	// HP2 specific - Handle player saving
 	guard(PlayerSaving);
 	APlayerPawn* Player = Client->Viewports(0)->Actor;

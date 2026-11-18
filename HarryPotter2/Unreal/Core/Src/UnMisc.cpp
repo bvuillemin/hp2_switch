@@ -2037,9 +2037,22 @@ CORE_API void appInit( const TCHAR* InPackage, const TCHAR* InCmdLine, FMalloc* 
 	{
 		// Create Package.ini from default.ini.
 		FString S;
+#if defined(__SWITCH__)
+		char GIniUtf8[512] = {0};
+		appToUtf8InPlace(GIniUtf8, GIni, sizeof(GIniUtf8));
+		SwitchLog("[SWITCH INI] Copying Default.ini to GIni '%s' (FileSize=%i)...\n", GIniUtf8, GFileManager->FileSize(GIni));
+		if( !appLoadFileToString( S, TEXT("Default.ini"), GFileManager ) )
+		{
+			SwitchLog("[SWITCH INI ERROR] appLoadFileToString failed for Default.ini!\n");
+			appErrorf( LocalizeError("MisingIni"), "Default.ini" );
+		}
+		UBOOL Saved = appSaveStringToFile( S, GIni );
+		SwitchLog("[SWITCH INI] appSaveStringToFile result = %i\n", Saved);
+#else
 		if( !appLoadFileToString( S, TEXT("Default.ini"), GFileManager ) )
 			appErrorf( LocalizeError("MisingIni"), "Default.ini" );
 		appSaveStringToFile( S, GIni );
+#endif
 		bDefaultIniChanged = true;
 	}
 
@@ -2057,9 +2070,22 @@ CORE_API void appInit( const TCHAR* InPackage, const TCHAR* InCmdLine, FMalloc* 
 	{
 		// Create User.ini from DefUser.ini.
 		FString S;
+#if defined(__SWITCH__)
+		char GUserIniUtf8[512] = {0};
+		appToUtf8InPlace(GUserIniUtf8, GUserIni, sizeof(GUserIniUtf8));
+		SwitchLog("[SWITCH INI] Copying DefUser.ini to GUserIni '%s' (FileSize=%i)...\n", GUserIniUtf8, GFileManager->FileSize(GUserIni));
+		if( !appLoadFileToString( S, TEXT("DefUser.ini"), GFileManager ) )
+		{
+			SwitchLog("[SWITCH INI ERROR] appLoadFileToString failed for DefUser.ini!\n");
+			appErrorf( LocalizeError("MisingIni"), "DefUser.ini" );
+		}
+		UBOOL SavedUser = appSaveStringToFile( S, GUserIni );
+		SwitchLog("[SWITCH INI] appSaveStringToFile User result = %i\n", SavedUser);
+#else
 		if( !appLoadFileToString( S, TEXT("DefUser.ini"), GFileManager ) )
 			appErrorf( LocalizeError("MisingIni"), "DefUser.ini" );
 		appSaveStringToFile( S, GUserIni );
+#endif
 	}
 
  	// Init config.

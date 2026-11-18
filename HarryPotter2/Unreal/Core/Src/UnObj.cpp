@@ -3528,15 +3528,18 @@ UObject* UObject::StaticConstructObject
 void UObject::SerializeRootSet( FArchive& Ar, DWORD KeepFlags, DWORD RequiredFlags )
 {
 	guard(UObject::SerializeRootSet);
+#if defined(__SWITCH__)
+	SwitchLog("[SWITCH GC] SerializeRootSet: GObjRoot.Num()=%i, GPendingLocalized.Num()=%i\n", GObjRoot.Num(), GPendingLocalized.Num());
+#endif
 	Ar << GObjRoot;
-	// Classes awaiting a retry in FlushPendingLocalizedDefaults() must survive
-	// garbage collection until they are flushed or dequeued; otherwise
-	// PurgeGarbage() can delete a queued class out from under
-	// GPendingLocalized, leaving a dangling UClass* that
-	// FlushPendingLocalizedDefaults() dereferences on the next EndLoad
-	// (SIGSEGV during level travel: SpawnPlayActor -> StaticLoadClass ->
-	// EndLoad -> FlushPendingLocalizedDefaults).
+#if defined(__SWITCH__)
+	SwitchLog("[SWITCH GC] GObjRoot serialized. Now serializing GPendingLocalized...\n");
+#endif
 	Ar << GPendingLocalized;
+#if defined(__SWITCH__)
+	SwitchLog("[SWITCH GC] GPendingLocalized serialized. Now scanning FObjectIterator roots...\n");
+#endif
+	INT RootCount = 0;
 	for( FObjectIterator It; It; ++It )
 	{
 		if
@@ -3544,9 +3547,13 @@ void UObject::SerializeRootSet( FArchive& Ar, DWORD KeepFlags, DWORD RequiredFla
 		&&	(It->GetFlags()&RequiredFlags)==RequiredFlags )
 		{
 			UObject* Obj = *It;
+			RootCount++;
 			Ar << Obj;
 		}
 	}
+#if defined(__SWITCH__)
+	SwitchLog("[SWITCH GC] SerializeRootSet finished, scanned %i roots, GGarbageRefCount=%i\n", RootCount, GGarbageRefCount);
+#endif
 	unguard;
 }
 
@@ -3666,6 +3673,9 @@ void UObject::PurgeGarbage()
 		debugf( NAME_Log, TEXT("Not purging garbage") );
 		return;
 	}
+#if defined(__SWITCH__)
+	SwitchLog("[SWITCH GC] Purging garbage...\n");
+#endif
 	debugf( NAME_Log, TEXT("Purging garbage") );
 
 	// Dispatch all Destroy messages.
@@ -3724,6 +3734,9 @@ void UObject::PurgeGarbage()
 	unguard;
 
 	debugf(TEXT("Garbage: objects: %i->%i; refs: %i"),CountBefore,CountBefore-CountPurged,GGarbageRefCount);
+#if defined(__SWITCH__)
+	SwitchLog("[SWITCH GC] Garbage purge complete: objects: %i->%i; refs: %i\n", CountBefore, CountBefore-CountPurged, GGarbageRefCount);
+#endif
 	unguard;
 }
 
@@ -3733,15 +3746,27 @@ void UObject::PurgeGarbage()
 void UObject::CollectGarbage( DWORD KeepFlags )
 {
 	guard(UObject::CollectGarbage);
+#if defined(__SWITCH__)
+	SwitchLog("[SWITCH GC] Starting CollectGarbage(0x%x), GObjObjects.Num()=%i...\n", KeepFlags, GObjObjects.Num());
+#endif
 	debugf( NAME_Log, TEXT("Collecting garbage") );
 
 	// Tag and purge garbage.
 	FArchiveTagUsed TagUsedAr;
+#if defined(__SWITCH__)
+	SwitchLog("[SWITCH GC] Calling SerializeRootSet...\n");
+#endif
 	SerializeRootSet( TagUsedAr, KeepFlags, RF_TagGarbage );
 
+#if defined(__SWITCH__)
+	SwitchLog("[SWITCH GC] Calling PurgeGarbage...\n");
+#endif
 	// Purge it.
 	PurgeGarbage();
 
+#if defined(__SWITCH__)
+	SwitchLog("[SWITCH GC] CollectGarbage completed successfully!\n");
+#endif
 	unguard;
 }
 

@@ -226,17 +226,17 @@ IMPLEMENT_CLASS(UGameSaveInfo);
 UBOOL NEQ(BYTE A,BYTE B,UPackageMap* Map) {return A!=B;}
 UBOOL NEQ(INT A,INT B,UPackageMap* Map) {return A!=B;}
 UBOOL NEQ(BITFIELD A,BITFIELD B,UPackageMap* Map) {return A!=B;}
-UBOOL NEQ(FLOAT& A,FLOAT& B,UPackageMap* Map) {return *(INT*)&A!=*(INT*)&B;}
-UBOOL NEQ(FVector& A,FVector& B,UPackageMap* Map) {return ((INT*)&A)[0]!=((INT*)&B)[0] || ((INT*)&A)[1]!=((INT*)&B)[1] || ((INT*)&A)[2]!=((INT*)&B)[2];}
-UBOOL NEQ(FRotator& A,FRotator& B,UPackageMap* Map) {return A.Pitch!=B.Pitch || A.Yaw!=B.Yaw || A.Roll!=B.Roll;}
+UBOOL NEQ(FLOAT A,FLOAT B,UPackageMap* Map) {return *(INT*)&A!=*(INT*)&B;}
+UBOOL NEQ(FVector A,FVector B,UPackageMap* Map) {return ((INT*)&A)[0]!=((INT*)&B)[0] || ((INT*)&A)[1]!=((INT*)&B)[1] || ((INT*)&A)[2]!=((INT*)&B)[2];}
+UBOOL NEQ(FRotator A,FRotator B,UPackageMap* Map) {return A.Pitch!=B.Pitch || A.Yaw!=B.Yaw || A.Roll!=B.Roll;}
 UBOOL NEQ(UObject* A,UObject* B,UPackageMap* Map) {return (Map->CanSerializeObject(A)?A:NULL)!=B;}
-UBOOL NEQ(FName& A,FName B,UPackageMap* Map) {return *(INT*)&A!=*(INT*)&B;}
+UBOOL NEQ(FName A,FName B,UPackageMap* Map) {return *(INT*)&A!=*(INT*)&B;}
 //UBOOL NEQ(FColor& A,FColor& B,UPackageMap* Map) {return *(INT*)&A!=*(INT*)&B;} //!! Alignment
-UBOOL NEQ(FColor& A,FColor& B,UPackageMap* Map) {return A.R!=B.R || A.G!=B.G || A.B!=B.B || A.A!=B.A; }
-UBOOL NEQ(FPlane& A,FPlane& B,UPackageMap* Map) {return
+UBOOL NEQ(FColor A,FColor B,UPackageMap* Map) {return A.R!=B.R || A.G!=B.G || A.B!=B.B || A.A!=B.A; }
+UBOOL NEQ(FPlane A,FPlane B,UPackageMap* Map) {return
 ((INT*)&A)[0]!=((INT*)&B)[0] || ((INT*)&A)[1]!=((INT*)&B)[1] ||
 ((INT*)&A)[2]!=((INT*)&B)[2] || ((INT*)&A)[3]!=((INT*)&B)[3];}
-UBOOL NEQ(FString A,FString B,UPackageMap* Map) {return A!=B;}
+UBOOL NEQ(const FString& A,const FString& B,UPackageMap* Map) {return A!=B;}
 
 #define DOREP(c,v) \
 	if( NEQ(v,((A##c*)Recent)->v,Map) ) \

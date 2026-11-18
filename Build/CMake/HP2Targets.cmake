@@ -22,6 +22,11 @@ elseif(WIN32)
         NOMINMAX
         _WIN32_WINNT=0x0A00
     )
+elseif(SWITCH)
+    target_compile_definitions(hp2_compile_policy INTERFACE
+        __SWITCH__=1
+        __UNIX__=1
+    )
 else()
     target_compile_definitions(hp2_compile_policy INTERFACE __UNIX__=1)
 endif()
@@ -50,6 +55,24 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "^(AppleClang|Clang)$")
         "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Werror=pointer-to-int-cast>"
         "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Werror=int-to-pointer-cast>"
         "$<$<AND:$<CONFIG:Release>,$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>>:-O3>"
+    )
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+    target_compile_options(hp2_compile_policy INTERFACE
+        "$<$<COMPILE_LANGUAGE:C,CXX>:-fsigned-char>"
+        "$<$<COMPILE_LANGUAGE:C,CXX>:-Wall>"
+        "$<$<COMPILE_LANGUAGE:C,CXX>:-Wextra>"
+        "$<$<COMPILE_LANGUAGE:C,CXX>:-Wno-unused-parameter>"
+        "$<$<COMPILE_LANGUAGE:C,CXX>:-Wno-reorder>"
+        "$<$<COMPILE_LANGUAGE:C,CXX>:-Wno-deprecated-copy>"
+        "$<$<COMPILE_LANGUAGE:C,CXX>:-Wno-ignored-qualifiers>"
+        "$<$<COMPILE_LANGUAGE:C,CXX>:-Wno-sign-compare>"
+        "$<$<COMPILE_LANGUAGE:C,CXX>:-Wno-overloaded-virtual>"
+        "$<$<COMPILE_LANGUAGE:C,CXX>:-Wno-extra-tokens>"
+        "$<$<COMPILE_LANGUAGE:C,CXX>:-Wno-stringop-overflow>"
+        "$<$<COMPILE_LANGUAGE:C,CXX>:-Wno-format-truncation>"
+        "$<$<COMPILE_LANGUAGE:C,CXX>:-Werror=pointer-to-int-cast>"
+        "$<$<COMPILE_LANGUAGE:C,CXX>:-Werror=int-to-pointer-cast>"
+        "$<$<AND:$<CONFIG:Release>,$<COMPILE_LANGUAGE:C,CXX>>:-O2>"
     )
 endif()
 
@@ -266,7 +289,7 @@ set(HP2_IMPORT_SOURCES
     "${HP2_IMPORT_ROOT}/Src/HP2ImportIni.cpp"
     "${HP2_IMPORT_ROOT}/Src/HP2ImportInstaller.cpp"
 )
-if(NOT EMSCRIPTEN)
+if(NOT EMSCRIPTEN AND NOT SWITCH)
     list(APPEND HP2_IMPORT_SOURCES "${HP2_IMPORT_ROOT}/Src/HP2ImportArchive.cpp")
 endif()
 add_library(hp2_import_core STATIC ${HP2_IMPORT_SOURCES})
@@ -277,7 +300,7 @@ target_link_libraries(hp2_import_core PUBLIC hp2_compile_policy PRIVATE utf8proc
 if(WIN32)
     target_link_libraries(hp2_import_core PUBLIC bcrypt)
 endif()
-if(NOT EMSCRIPTEN)
+if(NOT EMSCRIPTEN AND NOT SWITCH)
     target_link_libraries(hp2_import_core PRIVATE archive_static)
     add_executable(hp2_import "${HP2_IMPORT_ROOT}/Src/HP2ImportMain.cpp")
     target_link_libraries(hp2_import PRIVATE hp2_import_core hp2_compile_policy)
@@ -345,11 +368,27 @@ target_link_libraries(hp2_game PRIVATE
     hp2_import_core
     hp2_imgui
 )
-if(NOT EMSCRIPTEN)
+if(NOT EMSCRIPTEN AND NOT SWITCH)
     target_link_libraries(hp2_game PRIVATE nfd::nfd)
 endif()
 if(APPLE)
     target_link_libraries(hp2_game PRIVATE "${HP2_APPKIT_FRAMEWORK}")
+elseif(SWITCH)
+    target_link_libraries(hp2_game PRIVATE
+        -lnx
+        -lEGL -lglapi -lglad
+        -ldrm_nouveau
+        -lstdc++ -lpthread -lm
+    )
+    nx_generate_nacp(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/HarryPotter2.nacp"
+        NAME "Harry Potter and the Chamber of Secrets"
+        AUTHOR "KnowWonder / EA / hp2_switch"
+        VERSION "1.0.0"
+    )
+    nx_create_nro(HarryPotter2
+        TARGET hp2_game
+        NACP "${CMAKE_CURRENT_BINARY_DIR}/HarryPotter2.nacp"
+    )
 else()
     find_package(Threads REQUIRED)
     target_link_libraries(hp2_game PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
@@ -366,7 +405,7 @@ endif()
 # only for native workflows. The browser build skips these; the shared test
 # helper, hp2_state, and the data-present gate below stay common, and
 # HP2Web.cmake registers the browser smoke tests.
-if(NOT EMSCRIPTEN)
+if(NOT EMSCRIPTEN AND NOT SWITCH)
 
 hp2_add_executable(hp2_ucc
     ${HP2_UCC_SOURCES}
@@ -589,6 +628,7 @@ add_custom_target(hp2_verification_binaries
 )
 endif()
 
+if(BUILD_TESTING)
 # A test that needs game data is only registered when the configured data root
 # actually provides it. Without this guard a fresh clone (no data, by design)
 # registers tests that abort on a missing System/Default.ini, so a plain
@@ -608,6 +648,9 @@ message(STATUS "HP2 test data present at ${HP2_TEST_DATA_ROOT}: ${HP2_TEST_DATA_
 # HP2_ARTIFACT_DIR so structured reports, logs, and captures land in one
 # predictable place instead of ad-hoc stdout.
 function(hp2_add_behavior_test test_name target)
+    if(NOT BUILD_TESTING)
+        return()
+    endif()
     set(_hp2_test_root "${CMAKE_BINARY_DIR}/Testing/HP2/${test_name}")
     set(_hp2_test_home "${_hp2_test_root}/Home")
     set(_hp2_test_tmp "${_hp2_test_root}/Tmp")
@@ -1210,4 +1253,5 @@ if(HP2_ENABLE_VULKAN_DRIVER)
         TIMEOUT 600
     )
 
+endif()
 endif()

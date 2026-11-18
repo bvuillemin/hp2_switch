@@ -568,6 +568,9 @@ CORE_API extern UBOOL					GIsScriptable;
 CORE_API extern UBOOL					GIsEditor;
 CORE_API extern UBOOL					GIsClient;
 CORE_API extern UBOOL					GIsServer;
+#if defined(__SWITCH__)
+extern "C" CORE_API void SwitchLog( const char* Fmt, ... );
+#endif
 CORE_API extern UBOOL					GIsCriticalError;
 CORE_API extern UBOOL					GIsStarted;
 CORE_API extern UBOOL					GIsRunning;

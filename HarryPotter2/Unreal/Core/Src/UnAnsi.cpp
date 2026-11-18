@@ -2173,11 +2173,37 @@ CORE_API INT appStrcmp( const TCHAR* String1, const TCHAR* String2 )
 #endif
 }
 
+#if defined(__SWITCH__)
+static int hp2_wcscasecmp( const wchar_t* s1, const wchar_t* s2 )
+{
+	while( *s1 && towlower(*s1) == towlower(*s2) )
+	{
+		s1++;
+		s2++;
+	}
+	return (int)(towlower(*s1) - towlower(*s2));
+}
+
+static int hp2_wcsncasecmp( const wchar_t* s1, const wchar_t* s2, size_t n )
+{
+	while( n && *s1 && towlower(*s1) == towlower(*s2) )
+	{
+		s1++;
+		s2++;
+		n--;
+	}
+	if( n == 0 ) return 0;
+	return (int)(towlower(*s1) - towlower(*s2));
+}
+#endif
+
 CORE_API INT appStricmp( const TCHAR* String1, const TCHAR* String2 )
 {
 #if UNICODE
 #if defined(HP2_WINDOWS)
 	return _wcsicmp( String1, String2 );
+#elif defined(__SWITCH__)
+	return hp2_wcscasecmp( String1, String2 );
 #else
 	return wcscasecmp( String1, String2 );
 #endif
@@ -2247,6 +2273,8 @@ CORE_API INT appStrnicmp( const TCHAR* A, const TCHAR* B, INT Count )
 #if UNICODE
 #if defined(HP2_WINDOWS)
 	return _wcsnicmp( A, B, Count );
+#elif defined(__SWITCH__)
+	return hp2_wcsncasecmp( A, B, Count );
 #else
 	return wcsncasecmp( A, B, Count );
 #endif

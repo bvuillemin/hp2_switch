@@ -30,6 +30,48 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#if defined(__SWITCH__)
+#ifndef O_NOFOLLOW
+#define O_NOFOLLOW 0
+#endif
+#ifndef O_DIRECTORY
+#define O_DIRECTORY 0
+#endif
+#ifndef AT_SYMLINK_NOFOLLOW
+#define AT_SYMLINK_NOFOLLOW 0
+#endif
+#ifndef AT_REMOVEDIR
+#define AT_REMOVEDIR 0x200
+#endif
+
+static inline int openat(int dirfd, const char* pathname, int flags, ...)
+{
+	(void)dirfd;
+	return ::open(pathname, flags);
+}
+static inline int fstatat(int dirfd, const char* pathname, struct stat* statbuf, int flags)
+{
+	(void)dirfd; (void)flags;
+	return ::stat(pathname, statbuf);
+}
+static inline int unlinkat(int dirfd, const char* pathname, int flags)
+{
+	(void)dirfd;
+	if (flags & AT_REMOVEDIR)
+		return ::rmdir(pathname);
+	return ::unlink(pathname);
+}
+static inline int mkdirat(int dirfd, const char* pathname, mode_t mode)
+{
+	(void)dirfd;
+	return ::mkdir(pathname, mode);
+}
+static inline int renameat(int olddirfd, const char* oldpath, int newdirfd, const char* newpath)
+{
+	(void)olddirfd; (void)newdirfd;
+	return ::rename(oldpath, newpath);
+}
+#endif
 #endif
 namespace HP2Launcher
 {

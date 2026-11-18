@@ -121,7 +121,7 @@ void UDemoRecConnection::HandleClientPlayer( APlayerPawn* Pawn )
 		Super::HandleClientPlayer(Pawn);
 
 	// Setup music for demo
-	Pawn->Song        = Pawn->Level->Song;
+	Pawn->Song        = *Pawn->Level->Song;
 //	Pawn->SongSection = Pawn->Level->SongSection;
 //	Pawn->CdTrack     = Pawn->Level->CdTrack;
 	Pawn->Transition  = MTRAN_Fade;

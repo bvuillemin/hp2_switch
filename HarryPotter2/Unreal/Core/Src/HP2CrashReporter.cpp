@@ -11,6 +11,15 @@
 
 #include "HP2CrashReporter.h"
 
+#if defined(__SWITCH__)
+void HP2InstallCrashReporter( const struct HP2CrashReporterConfig* Config )
+{
+}
+void HP2SetCrashReporterLogHint( const char* Utf8Path )
+{
+}
+#else
+
 #if __UNIX__
 #include <signal.h>
 #include <fcntl.h>
@@ -419,4 +428,5 @@ void HP2InstallCrashReporter(const HP2CrashReporterConfig* Config)
 	fputs("HP2_CRASH installed\n", stderr);
 }
 void HP2SetCrashReporterLogHint(const char*) {}
+#endif
 #endif

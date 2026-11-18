@@ -16,6 +16,11 @@
 
 #include "Core.h"
 
+#if defined(__SWITCH__)
+#include <stdio.h>
+extern "C" FILE* GSwitchLogFile;
+#endif
+
 //
 // Fatal-error device. Mirrors the core ANSI error flow while surfacing the
 // error history as a UTF-8 message box on top of the plain-text stderr dump.
@@ -40,6 +45,17 @@ private:
 
 	void LocalPrint( const TCHAR* Str )
 	{
+#if defined(__SWITCH__)
+		if( GSwitchLogFile )
+		{
+			char Buffer[2048];
+			if( appToUtf8InPlace( Buffer, Str, ARRAY_COUNT(Buffer) ) )
+				fprintf( GSwitchLogFile, "%s", Buffer );
+			else
+				fprintf( GSwitchLogFile, "%ls", Str );
+			fflush( GSwitchLogFile );
+		}
+#endif
 #if UNICODE
 		wprintf( TEXT("%ls"), Str );
 #else

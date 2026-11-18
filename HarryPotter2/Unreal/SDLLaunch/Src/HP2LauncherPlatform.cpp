@@ -1,7 +1,7 @@
 #include "HP2LauncherPlatform.h"
 
 #include <SDL.h>
-#if !defined(__EMSCRIPTEN__)
+#if !defined(__EMSCRIPTEN__) && !defined(__SWITCH__)
 #include <nfd.h>
 #endif
 
@@ -11,14 +11,14 @@
 #if defined(_WIN32)
 #include <windows.h>
 #include <shellapi.h>
-#elif defined(__linux__)
+#elif defined(__linux__) && !defined(__SWITCH__)
 #include <spawn.h>
 extern char** environ;
 #endif
 
 namespace HP2LauncherPlatform
 {
-#if !defined(__EMSCRIPTEN__)
+#if !defined(__EMSCRIPTEN__) && !defined(__SWITCH__)
 namespace
 {
 class FNfdSession
@@ -39,7 +39,7 @@ private:
 HP2Launcher::LauncherCapabilities CurrentCapabilities()
 {
 	HP2Launcher::LauncherCapabilities result;
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) || defined(__SWITCH__)
 	result.screenModes = false;
 	result.resolutions = false;
 	result.rendererChoice = false;
@@ -51,7 +51,7 @@ HP2Launcher::LauncherCapabilities CurrentCapabilities()
 
 bool PickFolder(std::string& Path)
 {
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) || defined(__SWITCH__)
 	(void)Path;
 	return false;
 #else
@@ -72,7 +72,7 @@ bool PickFolder(std::string& Path)
 
 bool PickDiscImage(std::string& Path)
 {
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) || defined(__SWITCH__)
 	(void)Path;
 	return false;
 #else
@@ -97,7 +97,7 @@ bool PickDiscImage(std::string& Path)
 void RevealPath(const std::string& Path)
 {
 	if (Path.empty()) return;
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) || defined(__SWITCH__)
 	(void)Path;
 #elif defined(_WIN32)
 	const std::filesystem::path native = std::filesystem::u8path(Path);

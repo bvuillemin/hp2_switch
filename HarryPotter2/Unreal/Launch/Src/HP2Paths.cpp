@@ -18,6 +18,10 @@
 #include <vector>
 #if __UNIX__
 #include <unistd.h>
+#include <sys/stat.h>
+#endif
+#if defined(__SWITCH__)
+extern "C" void SwitchLog(const char* Fmt, ...);
 #endif
 #if HP2_WINDOWS
 #include <shlobj.h>
@@ -26,7 +30,12 @@
 namespace
 {
 constexpr const char* DataDirPrefix = "-datadir=";
-#if MACOSX
+#if defined(__SWITCH__)
+constexpr const char* ExternalDataSuffix = "";
+constexpr const char* ConventionalRetailDataSuffix = "";
+constexpr const char* ConventionalPrototypeDataSuffix = "";
+constexpr const char* UserSuffix = "User";
+#elif MACOSX
 constexpr const char* ExternalDataSuffix =
 	"Library/Application Support/Harry Potter 2/Data/Unreal";
 constexpr const char* ConventionalRetailDataSuffix =
@@ -98,7 +107,17 @@ char* CanonicalizeExistingDirectory(const char* Directory);
 // $XDG_DATA_HOME (falling back to $HOME/.local/share) on Linux. The
 // returned directory is not required to already exist on Linux; callers
 // create it as needed via EnsureDirectoryTree.
-#if MACOSX
+#if defined(__SWITCH__)
+char* ResolveDataHomePrefix()
+{
+	const char* SwitchRoot = "sdmc:/switch/hp2";
+	size_t Length = std::strlen(SwitchRoot);
+	char* Copy = static_cast<char*>(std::malloc(Length + 1));
+	if (Copy)
+		std::memcpy(Copy, SwitchRoot, Length + 1);
+	return Copy;
+}
+#elif MACOSX
 char* ResolveDataHomePrefix()
 {
 	return CanonicalizeExistingDirectory(std::getenv("HOME"));
@@ -175,6 +194,15 @@ bool IsReadableFile(const char* Filename)
 {
 	if (!Filename)
 		return false;
+#if defined(__SWITCH__)
+	FILE* F = std::fopen(Filename, "rb");
+	if (F)
+	{
+		std::fclose(F);
+		return true;
+	}
+	return false;
+#else
 	std::error_code Ec;
 	const std::filesystem::path Path = std::filesystem::u8path(Filename);
 	if (!std::filesystem::is_regular_file(Path, Ec) || Ec)
@@ -188,19 +216,29 @@ bool IsReadableFile(const char* Filename)
 #else
 	return true;
 #endif
+#endif
 }
 
 bool IsDirectory(const char* Directory)
 {
+	if (!Directory)
+		return false;
+#if defined(__SWITCH__)
+	struct stat St;
+	if (stat(Directory, &St) == 0 && S_ISDIR(St.st_mode))
+		return true;
+	return false;
+#else
 	std::error_code Ec;
 	return Directory && std::filesystem::is_directory(std::filesystem::u8path(Directory), Ec) && !Ec;
+#endif
 }
 
 bool IsWritableDirectory(const char* Directory)
 {
 	if (!IsDirectory(Directory))
 		return false;
-#if __UNIX__
+#if __UNIX__ && !defined(__SWITCH__)
 	std::error_code Ec;
 	const std::filesystem::perms Permissions =
 		std::filesystem::status(std::filesystem::u8path(Directory), Ec).permissions();
@@ -223,6 +261,15 @@ char* CanonicalizeExistingDirectory(const char* Directory)
 {
 	if (!Directory)
 		return nullptr;
+#if defined(__SWITCH__)
+	if (!IsDirectory(Directory))
+		return nullptr;
+	const size_t len = std::strlen(Directory);
+	char* Result = static_cast<char*>(std::malloc(len + 1));
+	if (Result)
+		std::memcpy(Result, Directory, len + 1);
+	return Result;
+#else
 	std::error_code Ec;
 	std::filesystem::path Canonical = std::filesystem::weakly_canonical(
 		std::filesystem::u8path(Directory), Ec);
@@ -233,6 +280,7 @@ char* CanonicalizeExistingDirectory(const char* Directory)
 	if (Result)
 		std::memcpy(Result, Utf8.c_str(), Utf8.size() + 1);
 	return Result;
+#endif
 }
 
 
@@ -1038,12 +1086,30 @@ char* ValidateDataRoot(const char* Candidate, HP2PathsBootstrapStatus* Status = 
 	}
 
 	char* DefaultIni = JoinPath(CanonicalRoot, "System/Default.ini");
-	const bool Valid = IsReadableFile(DefaultIni);
+	bool Valid = IsReadableFile(DefaultIni);
 	std::free(DefaultIni);
 	if (!Valid)
 	{
+		DefaultIni = JoinPath(CanonicalRoot, "system/default.ini");
+		Valid = IsReadableFile(DefaultIni);
+		std::free(DefaultIni);
+	}
+	if (!Valid)
+	{
+		DefaultIni = JoinPath(CanonicalRoot, "System/default.ini");
+		Valid = IsReadableFile(DefaultIni);
+		std::free(DefaultIni);
+	}
+	if (!Valid)
+	{
+		DefaultIni = JoinPath(CanonicalRoot, "system/Default.ini");
+		Valid = IsReadableFile(DefaultIni);
+		std::free(DefaultIni);
+	}
+	if (!Valid)
+	{
 		if (Status)
-			Status->Detail = "expected a readable System/Default.ini";
+			Status->Detail = "expected a readable System/Default.ini or system/default.ini";
 		std::free(CanonicalRoot);
 		return nullptr;
 	}
@@ -1093,7 +1159,9 @@ char* ValidateDataRoot(const char* Candidate, HP2PathsBootstrapStatus* Status = 
 
 char* DiscoverDevelopmentDataRoot()
 {
-#if HP2_WINDOWS
+#if defined(__SWITCH__)
+	return nullptr;
+#elif HP2_WINDOWS
 	std::error_code Ec;
 	std::filesystem::path Current = std::filesystem::current_path(Ec);
 	if (Ec)
@@ -1155,7 +1223,9 @@ char* DiscoverDevelopmentDataRoot()
 
 char* DiscoverPrototypeDataRoot()
 {
-#if HP2_WINDOWS
+#if defined(__SWITCH__)
+	return nullptr;
+#elif HP2_WINDOWS
 	std::error_code Ec;
 	std::filesystem::path Current = std::filesystem::current_path(Ec);
 	if (Ec)
@@ -1222,6 +1292,11 @@ bool EnsureDirectory(const char* Directory, int Mode)
 {
 	if (!Directory)
 		return false;
+#if defined(__SWITCH__)
+	(void)Mode;
+	mkdir(Directory, 0777);
+	return IsDirectory(Directory);
+#else
 	std::error_code Ec;
 	const std::filesystem::path Path = std::filesystem::u8path(Directory);
 	if (std::filesystem::create_directory(Path, Ec))
@@ -1240,6 +1315,7 @@ bool EnsureDirectory(const char* Directory, int Mode)
 	(void)Mode;
 	Ec.clear();
 	return std::filesystem::is_directory(Path, Ec) && !Ec;
+#endif
 }
 
 bool EnsureDirectoryTree(const char* Directory, int Mode)
@@ -1247,6 +1323,30 @@ bool EnsureDirectoryTree(const char* Directory, int Mode)
 	if (!Directory)
 		return false;
 	(void)Mode;
+#if defined(__SWITCH__)
+	if (IsDirectory(Directory))
+		return true;
+	char Buffer[1024];
+	std::strncpy(Buffer, Directory, sizeof(Buffer) - 1);
+	Buffer[sizeof(Buffer) - 1] = 0;
+	char* Start = Buffer;
+	char* Colon = std::strchr(Buffer, ':');
+	if (Colon)
+		Start = Colon + 1;
+	for (char* P = Start; *P; ++P)
+	{
+		if (*P == '/' || *P == '\\')
+		{
+			if (P == Start) continue;
+			char Saved = *P;
+			*P = 0;
+			mkdir(Buffer, 0777);
+			*P = Saved;
+		}
+	}
+	mkdir(Buffer, 0777);
+	return IsDirectory(Directory);
+#else
 	const std::filesystem::path Path = std::filesystem::u8path(Directory);
 	if (!Path.is_absolute())
 		return false;
@@ -1276,6 +1376,7 @@ bool EnsureDirectoryTree(const char* Directory, int Mode)
 			return false;
 	}
 	return true;
+#endif
 }
 
 bool EnsureWritableChildDirectory(const char* Parent, const char* Child, int Mode)
@@ -1289,7 +1390,9 @@ bool EnsureWritableChildDirectory(const char* Parent, const char* Child, int Mod
 
 char* PrepareLauncherRoot(const char* DataHomePrefix)
 {
-#if MACOSX
+#if defined(__SWITCH__)
+	char* ApplicationSupport = JoinPath(DataHomePrefix, "");
+#elif MACOSX
 	char* ApplicationSupport = JoinPath(
 		DataHomePrefix, "Library/Application Support/Harry Potter 2");
 #elif HP2_WINDOWS
@@ -1320,9 +1423,14 @@ char* PrepareLauncherRoot(const char* DataHomePrefix)
 
 char* PrepareActiveUserRoot(const char* UserRoot)
 {
+#if defined(__SWITCH__)
+	if (!UserRoot || !EnsureDirectoryTree(UserRoot, 0777))
+		return nullptr;
+#else
 	if (!UserRoot || !std::filesystem::u8path(UserRoot).is_absolute()
 		|| !EnsureDirectoryTree(UserRoot, 0700))
 		return nullptr;
+#endif
 
 	char* CanonicalUserRoot = CanonicalizeExistingDirectory(UserRoot);
 	if (!CanonicalUserRoot || !IsWritableDirectory(CanonicalUserRoot))
@@ -1571,11 +1679,19 @@ bool InstallHP2Paths(
 	std::string CanonicalDataRoot;
 	if (!ValidateHP2DataRoot(DataRoot, CanonicalDataRoot, Error))
 		return false;
+#if defined(__SWITCH__)
+	if (UserRoot.empty())
+	{
+		Error = "user directory must not be empty";
+		return false;
+	}
+#else
 	if (UserRoot.empty() || !std::filesystem::u8path(UserRoot).is_absolute())
 	{
 		Error = "user directory must be an absolute path";
 		return false;
 	}
+#endif
 
 	char* CanonicalUserRoot = PrepareActiveUserRoot(UserRoot.c_str());
 	if (!CanonicalUserRoot)
@@ -1583,6 +1699,7 @@ bool InstallHP2Paths(
 		Error = "could not create writable user directory";
 		return false;
 	}
+#if !defined(__SWITCH__)
 	if (IsSameOrDescendant(CanonicalDataRoot.c_str(), CanonicalUserRoot)
 		|| IsSameOrDescendant(CanonicalUserRoot, CanonicalDataRoot.c_str()))
 	{
@@ -1590,10 +1707,17 @@ bool InstallHP2Paths(
 		std::free(CanonicalUserRoot);
 		return false;
 	}
+#endif
 
 	char* SystemDirectory = JoinPath(CanonicalDataRoot.c_str(), "System");
 	char* CanonicalSystem = CanonicalizeExistingDirectory(SystemDirectory);
 	std::free(SystemDirectory);
+	if (!CanonicalSystem)
+	{
+		SystemDirectory = JoinPath(CanonicalDataRoot.c_str(), "system");
+		CanonicalSystem = CanonicalizeExistingDirectory(SystemDirectory);
+		std::free(SystemDirectory);
+	}
 	if (!CanonicalSystem)
 	{
 		Error = "could not canonicalize the validated System directory";
@@ -1751,7 +1875,11 @@ HP2PathsBootstrap BootstrapHP2Paths(int ArgC, char* const ArgV[])
 
 	if (!DataRoot)
 	{
-#if MACOSX
+#if defined(__SWITCH__)
+		const char* const DefaultExpectedRoot = "sdmc:/switch/hp2";
+		SwitchLog("[SWITCH PATHS ERROR] No game data installed yet! SearchedRoot='%s', RetailDataRoot='%s', PrototypeDataRoot='%s'\n",
+			Result.SearchedRoot.c_str(), Result.RetailDataRoot.c_str(), Result.PrototypeDataRoot.c_str());
+#elif MACOSX
 		const char* const DefaultExpectedRoot = "$HOME/Library/Application Support/Harry Potter 2/Data/Unreal";
 #elif HP2_WINDOWS
 		const char* const DefaultExpectedRoot = "%LOCALAPPDATA%/Harry Potter 2/Data/Unreal";
@@ -1766,6 +1894,7 @@ HP2PathsBootstrap BootstrapHP2Paths(int ArgC, char* const ArgV[])
 		return Result;
 	}
 
+#if !defined(__SWITCH__)
 	if (IsSameOrDescendant(DataRoot, UserRoot)
 		|| IsSameOrDescendant(UserRoot, DataRoot))
 	{
@@ -1774,10 +1903,17 @@ HP2PathsBootstrap BootstrapHP2Paths(int ArgC, char* const ArgV[])
 		std::free(DataRoot);
 		return Result;
 	}
+#endif
 
 	char* SystemDirectory = JoinPath(DataRoot, "System");
 	char* CanonicalSystem = CanonicalizeExistingDirectory(SystemDirectory);
 	std::free(SystemDirectory);
+	if (!CanonicalSystem)
+	{
+		SystemDirectory = JoinPath(DataRoot, "system");
+		CanonicalSystem = CanonicalizeExistingDirectory(SystemDirectory);
+		std::free(SystemDirectory);
+	}
 	std::free(DataRoot);
 	if (!CanonicalSystem)
 	{
@@ -1808,6 +1944,10 @@ HP2PathsBootstrap BootstrapHP2Paths(int ArgC, char* const ArgV[])
 
 	appSetBaseDir(BaseTchar);
 	appSetUserDir(UserTchar);
+#if defined(__SWITCH__)
+	SwitchLog("[SWITCH PATHS] Paths successfully configured! BaseDir='%ls', UserDir='%ls'\n",
+		appBaseDir(), appUserDir());
+#endif
 	std::free(BaseTchar);
 	std::free(UserTchar);
 	Result.Installed = true;

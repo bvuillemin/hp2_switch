@@ -253,9 +253,26 @@
         "CMAKE_CXX_FLAGS": "-sMEMORY64=1 -pthread -fwasm-exceptions -sSUPPORT_LONGJMP=wasm",
         "CMAKE_EXE_LINKER_FLAGS": "-sMEMORY64=1 -pthread -fwasm-exceptions -sSUPPORT_LONGJMP=wasm"
       }
+    },
+    {
+      "name": "switch-arm64",
+      "displayName": "Nintendo Switch arm64 Release",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/switch-arm64",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "$env{DEVKITPRO}/cmake/Switch.cmake",
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_POLICY_VERSION_MINIMUM": "3.5",
+        "HP2_REQUIRE_IMPLEMENTED_SOURCES": "ON",
+        "BUILD_TESTING": "OFF"
+      }
     }
   ],
   "buildPresets": [
+    {
+      "name": "switch-arm64",
+      "configurePreset": "switch-arm64"
+    },
     {
       "name": "macos-arm64",
       "configurePreset": "macos-arm64"

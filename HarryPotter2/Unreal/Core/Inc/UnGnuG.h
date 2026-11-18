@@ -60,16 +60,15 @@
 	#define ASMKNI 0
 	#define ASMLINUX 0
 	#define COMPILER "Compiled with Apple Clang (" __clang_version__ ")"
-#elif defined(__linux__) && (defined(__aarch64__) || defined(__arm64__))
+#elif (defined(__linux__) || defined(__SWITCH__)) && (defined(__aarch64__) || defined(__arm64__))
 	#ifndef __UNIX__
 		#define __UNIX__ 1
 	#endif
-	#define __LINUX__ 1
 	#define __ARM64__ 1
 	#define __INTEL_BYTE_ORDER__ 1
 	#define HP2_HOST_WCHAR_TCHAR 1
 	#if !defined(__BYTE_ORDER__) || __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
-		#error Linux aarch64 builds require little-endian byte order.
+		#error aarch64 builds require little-endian byte order.
 	#endif
 	#undef ASM
 	#undef ASM3DNOW
@@ -79,7 +78,12 @@
 	#define ASM3DNOW 0
 	#define ASMKNI 0
 	#define ASMLINUX 0
-	#define COMPILER "Compiled with GNU/Clang (" __VERSION__ ")"
+	#if defined(__SWITCH__)
+		#define COMPILER "Compiled with devkitA64 GCC (" __VERSION__ ")"
+	#else
+		#define __LINUX__ 1
+		#define COMPILER "Compiled with GNU/Clang (" __VERSION__ ")"
+	#endif
 #elif defined(__linux__) && defined(__x86_64__)
 	#ifndef __UNIX__
 		#define __UNIX__ 1
@@ -144,7 +148,7 @@
 #endif
 
 // Stack control.
-#if __UNIX__
+#if __UNIX__ && !defined(__SWITCH__)
 	#include <sys/wait.h>
 #endif
 #include <signal.h>
@@ -159,7 +163,7 @@ public:
 
 protected:
 	static void HandleSignal( int Sig );
-#if __UNIX__
+#if __UNIX__ && !defined(__SWITCH__)
 	static struct sigaction Act_SIGHUP;
 	static struct sigaction Act_SIGQUIT;
 	static struct sigaction Act_SIGILL;
@@ -229,6 +233,7 @@ enum {CACHE_LINE_SIZE   = 32}; // Cache line size.
 #endif
 #define ZEROARRAY 0 /* Zero-length arrays in structs */
 #define __cdecl
+#define __stdcall
 
 // MSVC's wide printf treats an unqualified %s as a wide string, and the
 // original engine relies on that contract throughout config, paths, and
@@ -612,7 +617,11 @@ static_assert(sizeof(wchar_t) == 4, "host TCHAR must use 32-bit wchar_t");
 #define GCC_OPT_INLINE
 
 // Memory
+#if defined(__GNUC__) || defined(__clang__)
+#define appAlloca(size) __builtin_alloca((size+7)&~7)
+#else
 #define appAlloca(size) alloca((size+7)&~7)
+#endif
 
 extern "C" { extern CORE_API UBOOL GTimestamp; }
 extern CORE_API FLOAT GSecondsPerCycle;

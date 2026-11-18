@@ -19,6 +19,9 @@
 #include <emscripten/emscripten.h>
 #include <GLES2/gl2.h>
 #endif
+#if defined(__SWITCH__)
+#include <switch.h>
+#endif
 
 #include "FConfigCacheIni.h"
 #if HP2_WINDOWS
@@ -65,6 +68,127 @@ FLauncherFileManager FileManager;
 // Optional stdout mirror installed for -log runs so harness scripts can
 // scrape progress markers from captured output.
 FOutputDeviceStdout StdoutEcho;
+
+#if defined(__SWITCH__)
+#include <sys/stat.h>
+#include <stdarg.h>
+
+extern "C" FILE* GSwitchLogFile = NULL;
+
+extern "C" void SwitchLog( const char* Fmt, ... )
+{
+	if( !GSwitchLogFile )
+	{
+		mkdir( "sdmc:/switch", 0777 );
+		mkdir( "sdmc:/switch/hp2", 0777 );
+		GSwitchLogFile = fopen( "sdmc:/switch/hp2/boot.log", "w" );
+		if( GSwitchLogFile )
+			setvbuf( GSwitchLogFile, NULL, _IONBF, 0 );
+	}
+	if( GSwitchLogFile )
+	{
+		va_list Args;
+		va_start( Args, Fmt );
+		vfprintf( GSwitchLogFile, Fmt, Args );
+		va_end( Args );
+		fflush( GSwitchLogFile );
+	}
+}
+
+class FSwitchEarlyMalloc final : public FMalloc
+{
+public:
+	void* Malloc( DWORD Count, const TCHAR* ) override { return std::malloc(Count); }
+	void* Realloc( void* Original, DWORD Count, const TCHAR* ) override { return std::realloc(Original, Count); }
+	void Free( void* Original ) override { std::free(Original); }
+	void DumpAllocs() override {}
+	void HeapCheck() override {}
+	void Init() override {}
+	void Exit() override {}
+};
+
+static FSwitchEarlyMalloc GSwitchEarlyMalloc;
+
+extern "C" void userAppInit( void )
+{
+	GMalloc = &GSwitchEarlyMalloc;
+	SwitchLog( "=== Harry Potter 2 Nintendo Switch Boot Log ===\n" );
+	SwitchLog( "[SWITCH STAGE 1] userAppInit: libnx services and SDMC initialized, early GMalloc active.\n" );
+}
+
+extern "C" void userAppExit( void )
+{
+	SwitchLog( "[SWITCH STAGE X] userAppExit called.\n" );
+	if( GSwitchLogFile )
+	{
+		fclose( GSwitchLogFile );
+		GSwitchLogFile = NULL;
+	}
+}
+
+extern "C" {
+	extern void (*__preinit_array_start []) (void) __attribute__((weak));
+	extern void (*__preinit_array_end []) (void) __attribute__((weak));
+	extern void (*__init_array_start []) (void) __attribute__((weak));
+	extern void (*__init_array_end []) (void) __attribute__((weak));
+	extern void _init(void);
+
+	void __libc_init_array(void)
+	{
+		SwitchLog("[SWITCH INIT] Overridden __libc_init_array started.\n");
+
+		size_t pre_count = __preinit_array_end - __preinit_array_start;
+		if( pre_count > 0 )
+		{
+			SwitchLog("[SWITCH INIT] Executing %zu preinit initializers...\n", pre_count);
+			for (size_t i = 0; i < pre_count; i++)
+			{
+				SwitchLog("  [preinit %zu/%zu] Calling %p...", i, pre_count, (void*)__preinit_array_start[i]);
+				__preinit_array_start[i]();
+				SwitchLog(" done.\n");
+			}
+		}
+
+		SwitchLog("[SWITCH INIT] Calling _init()...\n");
+		_init();
+		SwitchLog("[SWITCH INIT] _init() done.\n");
+
+		size_t count = __init_array_end - __init_array_start;
+		SwitchLog("[SWITCH INIT] Executing %zu initializers in .init_array...\n", count);
+		for (size_t i = 0; i < count; i++)
+		{
+			SwitchLog("  [init %02zu/%02zu] Calling %p...", i, count, (void*)__init_array_start[i]);
+			__init_array_start[i]();
+			SwitchLog(" done.\n");
+		}
+		SwitchLog("[SWITCH INIT] All constructors completed! Handing off to main()...\n");
+	}
+}
+
+alignas(16) u8 __nx_exception_stack[0x4000];
+u64 __nx_exception_stack_size = sizeof(__nx_exception_stack);
+
+extern "C" void __libnx_exception_handler(ThreadExceptionDump *ctx)
+{
+	SwitchLog("\n[SWITCH CRASH] === Unhandled CPU Hardware Exception ===\n");
+	SwitchLog("  error_desc: 0x%08x\n", ctx->error_desc);
+	SwitchLog("  pc:  0x%016lx\n", (unsigned long)ctx->pc.x);
+	SwitchLog("  lr:  0x%016lx\n", (unsigned long)ctx->lr.x);
+	SwitchLog("  sp:  0x%016lx\n", (unsigned long)ctx->sp.x);
+	SwitchLog("  fp:  0x%016lx\n", (unsigned long)ctx->fp.x);
+	SwitchLog("  far: 0x%016lx\n", (unsigned long)ctx->far.x);
+	for(int i = 0; i < 28; i += 2)
+	{
+		SwitchLog("  x%d: 0x%016lx  x%d: 0x%016lx\n",
+			i, (unsigned long)ctx->cpu_gprs[i].x,
+			i+1, (unsigned long)ctx->cpu_gprs[i+1].x);
+	}
+	if( GSwitchLogFile )
+	{
+		fflush( GSwitchLogFile );
+	}
+}
+#endif
 
 namespace
 {
@@ -453,10 +577,11 @@ void HideSplash()
 // silent: the splash is cosmetic and must never block startup.
 void ShowSplash( const TCHAR* Filename )
 {
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) || defined(__SWITCH__)
 	// The browser has a single canvas: a splash "window" is that canvas, and
 	// destroying it once the game window exists shrinks the game's canvas to
 	// 0x0, leaving the game drawing into nothing.
+	// On Switch, avoid creating a secondary window before the primary EGL display is initialized.
 	(void)Filename;
 #else
 	TArray<BYTE> SplashData;
@@ -4365,7 +4490,7 @@ public:
 			return;
 		Sample->ClassResolutionRecorded = 1;
 		AppendGate(*Sample,"class_resolution",Class != NULL);
-		for( std::vector<Rng>::reverse_iterator It = Sample->Rng.rbegin(); It != Sample->Rng.rend(); ++It )
+		for( auto It = Sample->Rng.rbegin(); It != Sample->Rng.rend(); ++It )
 			if( It->Kind == "rand" && !It->HasResolvedClass )
 			{
 				It->HasResolvedClass = 1;
@@ -4411,10 +4536,10 @@ public:
 private:
 	struct Slot { UBOOL Present; std::string Path, Class; Slot():Present(0){} };
 	struct Gate { std::string Name; UBOOL Passed; Gate(const char* InName,UBOOL InPassed):Name(InName),Passed(InPassed){} };
-	struct Rng
+	struct RngRecord
 	{
 		std::string Kind, ResolvedClass; INT Raw, Bound, Index; FLOAT Min, Max, Value; UBOOL HasResolvedClass;
-		Rng(const char* InKind,INT InRaw,INT InBound,INT InIndex,FLOAT InMin,FLOAT InMax,FLOAT InValue)
+		RngRecord(const char* InKind,INT InRaw,INT InBound,INT InIndex,FLOAT InMin,FLOAT InMax,FLOAT InValue)
 			:Kind(InKind),Raw(InRaw),Bound(InBound),Index(InIndex),Min(InMin),Max(InMax),Value(InValue),HasResolvedClass(0){}
 	};
 	struct Event
@@ -4422,7 +4547,7 @@ private:
 		AActor* Owner; std::string Identity, Tag; unsigned long long Frame; INT Order;
 		FLOAT CurrTime, WaitTime, DeltaSeconds, TriggerWaitingTime; UBOOL BOff, GenerateCreature;
 		INT ActiveCount, ActiveMax, BaseCreatureCount; Slot FirstPP; UBOOL HasCameraVisible, CameraVisible;
-		std::vector<Gate> Gates; std::vector<Rng> Rng; Slot SpawnRequest;
+		std::vector<Gate> Gates; std::vector<RngRecord> Rng; Slot SpawnRequest;
 		UBOOL HasSpawnRequest, HasSpawnResult, HasSpawnPublished, GeneratePrefixRecorded, ClassResolutionRecorded; Slot SpawnResult, SpawnPublished;
 		Event():Owner(NULL),Frame(0),Order(0),CurrTime(0),WaitTime(0),DeltaSeconds(0),TriggerWaitingTime(0),BOff(0),GenerateCreature(0),ActiveCount(0),ActiveMax(0),BaseCreatureCount(0),HasCameraVisible(0),CameraVisible(0),HasSpawnRequest(0),HasSpawnResult(0),HasSpawnPublished(0),GeneratePrefixRecorded(0),ClassResolutionRecorded(0){}
 	};
@@ -4477,7 +4602,7 @@ private:
 	}
 	static std::string NormalizedIdentity(AActor* Actor) { return std::string("<map>.")+Text(Actor->GetName()); }
 	static void AppendGate(Event& Sample,const char* Name,UBOOL Passed) { Sample.Gates.push_back(Gate(Name,Passed)); }
-	static Rng RngSample(const char* Kind,INT Raw,INT Bound,INT Index,FLOAT Min,FLOAT Max,FLOAT Value) { return Rng(Kind,Raw,Bound,Index,Min,Max,Value); }
+	static RngRecord RngSample(const char* Kind,INT Raw,INT Bound,INT Index,FLOAT Min,FLOAT Max,FLOAT Value) { return RngRecord(Kind,Raw,Bound,Index,Min,Max,Value); }
 	Event* Current(AActor* Actor)
 	{
 		if(!IsCreature(Actor)) return NULL;
@@ -4510,7 +4635,7 @@ private:
 		Json+=",\"active\":{\"count\":"+std::to_string(Sample.ActiveCount)+",\"max\":"+std::to_string(Sample.ActiveMax)+"},\"first_pp\":"+SlotJson(Sample.FirstPP)+",\"camera_visible\":"+(Sample.HasCameraVisible?(Sample.CameraVisible?"true":"false"):"null")+",\"base_creature_count\":"+std::to_string(Sample.BaseCreatureCount)+",\"gates\":[";
 		for(std::vector<Gate>::const_iterator It=Sample.Gates.begin();It!=Sample.Gates.end();++It) { if(It!=Sample.Gates.begin()) Json+=","; Json+="{\"name\":\""+Escape(It->Name)+"\",\"passed\":"+(It->Passed?"true":"false")+"}"; }
 		Json+="],\"rng\":[";
-		for(std::vector<Rng>::const_iterator It=Sample.Rng.begin();It!=Sample.Rng.end();++It) { if(It!=Sample.Rng.begin()) Json+=","; Json+="{\"kind\":\""+Escape(It->Kind)+"\",\"raw\":"+std::to_string(It->Raw)+",\"index\":"+(It->Kind=="rand"?std::to_string(It->Index):"null")+",\"resolved_class\":"+(It->HasResolvedClass?JsonStringOrNull(It->ResolvedClass):"null"); if(It->Kind=="rand") Json+=",\"bound\":"+std::to_string(It->Bound); else Json+=",\"min\":"+std::to_string(It->Min)+",\"max\":"+std::to_string(It->Max)+",\"result\":"+std::to_string(It->Value); Json+="}"; }
+		for(std::vector<RngRecord>::const_iterator It=Sample.Rng.begin();It!=Sample.Rng.end();++It) { if(It!=Sample.Rng.begin()) Json+=","; Json+="{\"kind\":\""+Escape(It->Kind)+"\",\"raw\":"+std::to_string(It->Raw)+",\"index\":"+(It->Kind=="rand"?std::to_string(It->Index):"null")+",\"resolved_class\":"+(It->HasResolvedClass?JsonStringOrNull(It->ResolvedClass):"null"); if(It->Kind=="rand") Json+=",\"bound\":"+std::to_string(It->Bound); else Json+=",\"min\":"+std::to_string(It->Min)+",\"max\":"+std::to_string(It->Max)+",\"result\":"+std::to_string(It->Value); Json+="}"; }
 		Json+="],\"spawn\":{\"request\":"+(Sample.HasSpawnRequest?SlotJson(Sample.SpawnRequest):"null")+",\"result\":"+(Sample.HasSpawnResult?SlotJson(Sample.SpawnResult):"null")+",\"published_child\":"+(Sample.HasSpawnPublished?SlotJson(Sample.SpawnPublished):"null")+"}}";
 		return Json;
 	}
@@ -5315,6 +5440,10 @@ void MainLoop( UEngine* Engine, INT TestTicks, FLOAT FixedDeltaSeconds, Lifecycl
 	MainLoopBegin( State );
 	while( GIsRunning && !GIsRequestingExit )
 	{
+#if defined(__SWITCH__)
+		if( !appletMainLoop() )
+			break;
+#endif
 		MainLoopTick( State );
 		MainLoopFrameCap( State );
 	}
@@ -5825,6 +5954,9 @@ static int HP2BootAfterLauncher(
 	HP2CrashReporterConfig& CrashConfig)
 {
 	INT ExitCode = 0;
+#if defined(__SWITCH__)
+	SwitchLog("[SWITCH STAGE 4] Entering HP2BootAfterLauncher...\n");
+#endif
 	HP2InstallTraceHookBindings( GTraceHookBindings );
 	// StaticInit may construct the Fire class default object. The observer must
 	// exist before that process-global initialization to retain InitTables'
@@ -5869,7 +6001,9 @@ static int HP2BootAfterLauncher(
 			FConfigCacheIni::Factory,
 			1 );
 
-
+#if defined(__SWITCH__)
+		SwitchLog("[SWITCH STAGE 5] appInit completed successfully!\n");
+#endif
 
 		// Register all statically linked packages.
 		RegisterHP2RuntimeClasses();
@@ -5890,14 +6024,24 @@ static int HP2BootAfterLauncher(
 		// Emscripten builds exactly one SDL video backend (the HTML5 canvas).
 		// Any SDL_HINT_VIDEODRIVER value makes SDL_Init(SDL_INIT_VIDEO) fail,
 		// so the hint is left unset here.
+#elif defined(__SWITCH__)
+		// Switch SDL2 has its own internal video driver, do not force wayland/x11!
 #elif HP2_WINDOWS
 		// Let SDL select the available Windows video backend.
 #else
 		SDL_SetHint( SDL_HINT_VIDEODRIVER, "wayland,x11" );
 #endif
 
+#if defined(__SWITCH__)
+		SwitchLog("[SWITCH STAGE 6] Calling SDL_Init (Video/Joystick)...\n");
+#endif
+
 		if( SDL_Init( SDL_INIT_VIDEO | SDL_INIT_JOYSTICK ) != 0 )
 			debugf( NAME_Warning, TEXT("SDL_Init failed: %s"), *SdlStatusText( SDL_GetError() ) );
+
+#if defined(__SWITCH__)
+		SwitchLog("[SWITCH STAGE 7] SDL_Init returned (Video/Joystick)\n");
+#endif
 
 		// Optional splash: shown before the engine initializes, hidden once
 		// the main loop starts.
@@ -5910,8 +6054,12 @@ static int HP2BootAfterLauncher(
 				ShowSplash( *SplashName );
 		}
 
+#if defined(__SWITCH__)
+		GLogHook = &StdoutEcho;
+#else
 		if( ParseParam( appCmdLine(), TEXT("LOG") ) )
 			GLogHook = &StdoutEcho;
+#endif
 		// Client/server context globals. The old launcher set these between
 		// SDL_Init and engine init; they are load-bearing far beyond display
 		// selection: ULinker derives _ContextFlags from them, and a zero
@@ -5979,7 +6127,13 @@ static int HP2BootAfterLauncher(
 
 
 
+#if defined(__SWITCH__)
+		SwitchLog("[SWITCH STAGE 8] Calling InitEngine()...\n");
+#endif
 		UEngine* Engine = InitEngine();
+#if defined(__SWITCH__)
+		SwitchLog("[SWITCH STAGE 9] InitEngine() returned: %p\n", Engine);
+#endif
 		if( !Engine )
 			appErrorf( TEXT("Could not initialize the game engine") );
 		if( FireTextureTrace )
@@ -6075,6 +6229,11 @@ static int HP2BootAfterLauncher(
 		// HandleError prints the History via stdout's wprintf; mirror it on
 		// stderr so harnesses capturing only stderr still see the cause.
 		fprintf( stderr, "%ls", GErrorHist );
+#if defined(__SWITCH__)
+		char HistUtf8[4096] = {0};
+		appToUtf8InPlace(HistUtf8, GErrorHist, sizeof(HistUtf8));
+		SwitchLog("[SWITCH FATAL ERROR] Engine exception caught: %s\n", HistUtf8);
+#endif
 	}
 #endif
 
@@ -6126,8 +6285,71 @@ static void HP2LauncherBrowserFrame(void* Context)
 }
 #endif
 
+#if defined(__SWITCH__)
+struct FSwitchMainArgs
+{
+	int ArgC;
+	char** ArgV;
+	int Result;
+};
+
+static int RealMain( int ArgC, char* ArgV[] );
+
+static void SwitchMainThread( void* Arg )
+{
+	FSwitchMainArgs* Args = (FSwitchMainArgs*)Arg;
+	SwitchLog( "[SWITCH THREAD] Entered 16MB Game Thread!\n" );
+	Args->Result = RealMain( Args->ArgC, Args->ArgV );
+	SwitchLog( "[SWITCH THREAD] Exiting 16MB Game Thread with result %d.\n", Args->Result );
+}
+
 int main( int ArgC, char* ArgV[] )
 {
+	SwitchLog( "[SWITCH STAGE 2] main() entered on loader thread (stack ~1MB). Spawning 16MB game thread...\n" );
+	if( ArgV )
+	{
+		for( int i = 0; i < ArgC && i < 16; ++i )
+			SwitchLog( "  ArgV[%d] = '%s'\n", i, ArgV[i] ? ArgV[i] : "<null>" );
+	}
+
+	Thread GameThread;
+	const size_t StackSize = 16 * 1024 * 1024; // 16 MB stack
+	s32 CurrentPrio = 0x2C;
+	svcGetThreadPriority( &CurrentPrio, CUR_THREAD_HANDLE );
+
+	FSwitchMainArgs Args = { ArgC, ArgV, 0 };
+	Result rc = threadCreate( &GameThread, SwitchMainThread, &Args, NULL, StackSize, CurrentPrio, -2 );
+	if( R_SUCCEEDED(rc) )
+	{
+		SwitchLog( "[SWITCH] 16MB game thread created successfully (prio=0x%x, handle=0x%x). Starting...\n", CurrentPrio, GameThread.handle );
+		rc = threadStart( &GameThread );
+		if( R_SUCCEEDED(rc) )
+		{
+			threadWaitForExit( &GameThread );
+			threadClose( &GameThread );
+			SwitchLog( "[SWITCH] Game thread finished cleanly. Returning %d.\n", Args.Result );
+			return Args.Result;
+		}
+		else
+		{
+			SwitchLog( "[SWITCH ERROR] threadStart failed: 0x%x\n", rc );
+			threadClose( &GameThread );
+		}
+	}
+	else
+	{
+		SwitchLog( "[SWITCH ERROR] threadCreate failed: 0x%x. Falling back to loader thread.\n", rc );
+	}
+
+	return RealMain( ArgC, ArgV );
+}
+
+static int RealMain( int ArgC, char* ArgV[] )
+#else
+int main( int ArgC, char* ArgV[] )
+#endif
+{
+
 	// Install the real process allocator before anything else can touch
 	// engine containers: every FString/TArray allocation routes through
 	// GMalloc, and the FMallocError stub installed at static init returns
@@ -6141,8 +6363,25 @@ int main( int ArgC, char* ArgV[] )
 	// state, not a crash: the launcher still opens and offers to import, so
 	// only a broken environment ends the process here.
 	const HP2PathsBootstrap Bootstrap = BootstrapHP2Paths( ArgC, ArgV );
+#if defined(__SWITCH__)
+	char BaseUtf8[512] = {0};
+	char UserUtf8[512] = {0};
+	appToUtf8InPlace(BaseUtf8, appBaseDir(), sizeof(BaseUtf8));
+	appToUtf8InPlace(UserUtf8, appUserDir(), sizeof(UserUtf8));
+	SwitchLog("[SWITCH STAGE 3] BootstrapHP2Paths: Installed=%d, RetailDataRoot='%s', SearchedRoot='%s', BaseDir='%s', UserDir='%s'\n",
+		Bootstrap.Installed,
+		Bootstrap.RetailDataRoot.c_str(),
+		Bootstrap.SearchedRoot.c_str(),
+		BaseUtf8,
+		UserUtf8);
+#endif
 	if( !Bootstrap.Installed && !ShouldRunNativeLauncher( ArgC, ArgV ) )
+	{
+#if defined(__SWITCH__)
+		SwitchLog("[SWITCH BOOT ERROR] Failed to install paths and launcher disabled! Exiting.\n");
+#endif
 		return 1;
+	}
 
 	// Crash reporter: signal handlers plus atexit marker; watchdog unused
 	// here. Writes crash-report.json (frames + log tail) into the working
@@ -6169,7 +6408,39 @@ int main( int ArgC, char* ArgV[] )
 
 	const FString ForwardedArguments = ForwardedCommandLine( ArgC, ArgV );
 	FString EngineCommandLine = ForwardedArguments;
+#if defined(__SWITCH__)
+	const bool ShowLauncher = false;
+	if( EngineCommandLine.Len() == 0 || EngineCommandLine.InStr(TEXT(".unr")) == INDEX_NONE )
+	{
+		std::vector<SaveRecord> DiscoveredSaves;
+		std::string SaveError;
+		std::string UserRoot = Bootstrap.SearchedRoot + "/User";
+		DiscoverSaves( UserRoot, DiscoveredSaves, SaveError );
+
+		std::string LaunchPrefix;
+		if( !DiscoveredSaves.empty() )
+		{
+			const SaveRecord& Latest = DiscoveredSaves[0];
+			SwitchLog( "[SWITCH SAVE] Found %zu save(s). Continuing from %s (saveIndex=%d, slot=%d)...\n",
+				DiscoveredSaves.size(), Latest.displayName.c_str(), Latest.saveIndex, Latest.slot );
+			LaunchPrefix = "Startup.unr -LOAD=" + std::to_string(Latest.saveIndex);
+			if( Latest.usesSlotDirectory )
+				LaunchPrefix += " -SAVESLOT=" + std::to_string(Latest.slot);
+		}
+		else
+		{
+			SwitchLog( "[SWITCH SAVE] No saves found in '%s'. Starting New Game at PrivetDr.unr...\n", UserRoot.c_str() );
+			LaunchPrefix = "PrivetDr.unr -SAVESLOT=0";
+		}
+
+		if( EngineCommandLine.Len() )
+			LaunchPrefix += " " + std::string(TCHAR_TO_ANSI(*EngineCommandLine));
+		EngineCommandLine = ANSI_TO_TCHAR(LaunchPrefix.c_str());
+		SwitchLog( "[SWITCH LAUNCH] EngineCommandLine = '%s'\n", LaunchPrefix.c_str() );
+	}
+#else
 	const bool ShowLauncher = ShouldRunNativeLauncher( ArgC, ArgV );
+#endif
 
 #if defined(__EMSCRIPTEN__)
 	if( ShowLauncher )

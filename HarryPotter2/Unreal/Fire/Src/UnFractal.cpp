@@ -4439,7 +4439,8 @@ void UFireTexture::Serialize( FArchive& Ar )
 		if( ActiveSparkNum < Sparks.Num() )
 			Sparks.Remove( ActiveSparkNum, Sparks.Num()-ActiveSparkNum ); 
 	}
-	Ar << Sparks;
+	TArray<FSpark>* SparksPtr = (TArray<FSpark>*)(void*)&Sparks;
+	Ar << *SparksPtr;
 
 	// Expand the compacted array again. Sparks.Num() should always be equal to SparksLimit !
 	if( Sparks.Num() < SparksLimit )

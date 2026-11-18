@@ -27,12 +27,29 @@
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#if !defined(__SWITCH__)
 #include <dlfcn.h>
+#endif
 #include <netdb.h>
 
 // Core includes.
 #include "CorePrivate.h"
 #include "HP2RngSeed.h"
+
+#if __STATIC_LINK
+static char GHP2StaticLinkHandle;
+#endif
+
+static char* hp2_strdup( const char* str )
+{
+	if( !str )
+		return NULL;
+	size_t len = strlen( str );
+	char* copy = static_cast<char*>(malloc( len + 1 ));
+	if( copy )
+		memcpy( copy, str, len + 1 );
+	return copy;
+}
 
 // Context runs before appInit and class registration. Retain only libc state
 // here: the trace subsystem becomes available later in appPlatformInit.
@@ -394,6 +411,7 @@ UBOOL USystem::Exec( const TCHAR* Cmd, FOutputDevice& Ar )
 		Arg0Utf8.NormalizePath();
 		free( Arg0 );
 
+#if !defined(__SWITCH__)
 		const pid_t Pid = fork();
 		if( Pid==0 )
 		{
@@ -404,6 +422,9 @@ UBOOL USystem::Exec( const TCHAR* Cmd, FOutputDevice& Ar )
 		if( Pid<0 )
 			appErrorf( TEXT("Failed to launch process.") );
 		appRequestExit( 0 );
+#else
+		(void)Arg0Utf8;
+#endif
 
 		return 1;
 	}
@@ -501,15 +522,12 @@ void* appGetDllHandle( const TCHAR* Filename )
 {
 	guard(appGetDllHandle);
 
-	#if defined(__EMSCRIPTEN__) && __STATIC_LINK
-		// Emscripten only gives dlopen a usable handle with MAIN_MODULE, which
-		// this build does not use. The caller only tests the handle for NULL
-		// (which would skip ProcessRegistrants); exports resolve through
-		// FindNative under __STATIC_LINK instead of dlsym.
+	#if (defined(__EMSCRIPTEN__) || defined(__SWITCH__)) && __STATIC_LINK
+		// Static linking: exports resolve through FindNative/static registration.
 		return &GHP2StaticLinkHandle;
 	#elif __STATIC_LINK
 		return dlopen( NULL, RTLD_NOW );
-	#endif
+	#else
 	check(Filename);
 	const TCHAR* PackageName = Filename;
 	for( const TCHAR* Cursor=Filename; *Cursor; ++Cursor )
@@ -567,6 +585,7 @@ void* appGetDllHandle( const TCHAR* Filename )
 	}
 
 	return Result;
+	#endif
 	unguard;
 }
 
@@ -578,7 +597,7 @@ void appFreeDllHandle( void* DllHandle )
 	guard(appFreeDllHandle);
 	check(DllHandle);
 
-	#if !(defined(__EMSCRIPTEN__) && __STATIC_LINK)
+	#if !( (defined(__EMSCRIPTEN__) || defined(__SWITCH__)) && __STATIC_LINK )
 	dlclose( DllHandle );
 	#endif
 
@@ -594,7 +613,7 @@ void* appGetDllExport( void* DllHandle, const TCHAR* ProcName )
 	check(DllHandle);
 	check(ProcName);
 
-	#if defined(__EMSCRIPTEN__) && __STATIC_LINK
+	#if (defined(__EMSCRIPTEN__) || defined(__SWITCH__)) && __STATIC_LINK
 	// Everything is linked into the module; there are no separate exports to
 	// resolve through a dynamic loader.
 	return NULL;
@@ -789,10 +808,12 @@ CORE_API DWORD appCycles()
 // Return CPU time consumed by this process, excluding time spent asleep.
 CORE_API FTime appProcessSeconds()
 {
+#if defined(CLOCK_PROCESS_CPUTIME_ID)
 	struct timespec ProcessTime;
 	if( clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ProcessTime)==0 )
 		return static_cast<double>(ProcessTime.tv_sec)
 			+ static_cast<double>(ProcessTime.tv_nsec) / 1000000000.0;
+#endif
 	return 0.0;
 }
 
@@ -827,8 +848,15 @@ CORE_API void appSleep( FLOAT Seconds )
 {
 	guard(appSleep);
 
+#if defined(__SWITCH__)
+	struct timespec req;
+	req.tv_sec = (time_t)Seconds;
+	req.tv_nsec = (long)((Seconds - (time_t)Seconds) * 1000000000.0);
+	nanosleep( &req, NULL );
+#else
 	INT SleepTime = appRound(Seconds * 1000000);
 	usleep( SleepTime );
+#endif
 
 	unguard;
 }
@@ -927,6 +955,9 @@ void appGetGUID( void* GUID )
 	// and returns 0 on success, matching the zero-filled failure case below.
 	if( getentropy( Bytes, 16 ) != 0 )
 		memset( Bytes, 0, 16 );
+#elif defined(__SWITCH__)
+	for( int i = 0; i < 16; ++i )
+		Bytes[i] = static_cast<BYTE>(rand() & 0xFF);
 #else
 	arc4random_buf( Bytes, 16 );
 #endif
@@ -1014,7 +1045,11 @@ static TCHAR* appUnixCanonicalRoot( const TCHAR* Dir )
 
 	FUnixUtf8String Utf8Dir( Dir );
 	Utf8Dir.NormalizePath();
+#if defined(__SWITCH__)
+	ANSICHAR* ResolvedUtf8 = hp2_strdup( *Utf8Dir );
+#else
 	ANSICHAR* ResolvedUtf8 = realpath( *Utf8Dir, NULL );
+#endif
 	if( !ResolvedUtf8 )
 		return appUnixNormalizeRootText( Dir );
 
@@ -1058,6 +1093,9 @@ static ANSICHAR* appUnixGetCurrentDirectory()
 
 static ANSICHAR* appUnixGetHostName()
 {
+#if defined(__SWITCH__)
+	return hp2_strdup("switch");
+#else
 	const long Maximum = sysconf( _SC_HOST_NAME_MAX );
 	if( Maximum>0 && static_cast<uint64_t>(Maximum)>=static_cast<uint64_t>(SIZE_MAX) )
 		return NULL;
@@ -1070,10 +1108,14 @@ static ANSICHAR* appUnixGetHostName()
 	}
 	Buffer[Capacity-1] = 0;
 	return Buffer;
+#endif
 }
 
 static ANSICHAR* appUnixGetLoginName()
 {
+#if defined(__SWITCH__)
+	return hp2_strdup("switch");
+#else
 	const long Maximum = sysconf( _SC_LOGIN_NAME_MAX );
 	if( Maximum>0 && static_cast<uint64_t>(Maximum)>=static_cast<uint64_t>(SIZE_MAX) )
 		return NULL;
@@ -1092,6 +1134,7 @@ static ANSICHAR* appUnixGetLoginName()
 		Capacity *= 2;
 		Buffer = static_cast<ANSICHAR*>(appUnixSystemRealloc(Buffer,Capacity));
 	}
+#endif
 }
 
 // Get startup directory.
@@ -1187,6 +1230,14 @@ void appPlatformInit()
 	// System initialization.
 	GSys = new USystem;
 	GSys->LoadConfig();
+#if defined(__SWITCH__)
+	SwitchLog("[SWITCH STAGE 4.5] GSys->LoadConfig completed. Paths.Num() = %i\n", GSys->Paths.Num());
+	for( INT p = 0; p < GSys->Paths.Num(); p++ )
+	{
+		FUnixUtf8String PathUtf8( *GSys->Paths(p) );
+		SwitchLog("  Paths[%i] = '%s'\n", p, *PathUtf8);
+	}
+#endif
 	if( GSys->Paths.Num()<=5 )
 		appErrorf(TEXT("Core.System Paths did not load from System.ini"));
 	GSys->AddToRoot();
@@ -1210,11 +1261,13 @@ void appPlatformInit()
 	// The monotonic timer frequency is fixed by steady_clock's duration.
 	debugf( NAME_Init, TEXT("Steady timer frequency=%f MHz"), 0.000001 / GSecondsPerCycle );
 
+#if !defined(__SWITCH__)
 	struct sigaction sa_child;
 	sa_child.sa_handler = HandleChild;
 	sigemptyset( &sa_child.sa_mask );
 	sa_child.sa_flags = 0;
 	sigaction(SIGCHLD, &sa_child, 0);
+#endif
 	
 	unguard;
 }
@@ -1267,6 +1320,7 @@ char* appUnixPath( const char* Path )
 DWORD appGetLocalIP( void )
 {
 	static DWORD LocalIP = 0;
+#if !defined(__SWITCH__)
 	struct hostent* Hostinfo;
 
 	if( LocalIP==0 )
@@ -1277,7 +1331,7 @@ DWORD appGetLocalIP( void )
 		if( Hostinfo && Hostinfo->h_addr_list[0] )
 			appMemcpy( &LocalIP, Hostinfo->h_addr_list[0], appCheckedIntSize(sizeof(LocalIP)) );
 	}
-
+#endif
 	return LocalIP;
 }
 
@@ -1317,6 +1371,7 @@ char* strupr( char* s )
 	Signal Handling
 -----------------------------------------------------------------------------*/
 jmp_buf __Context::Env;
+#if !defined(__SWITCH__)
 struct sigaction __Context::Act_SIGHUP;
 struct sigaction __Context::Act_SIGQUIT;
 struct sigaction __Context::Act_SIGILL;
@@ -1326,11 +1381,13 @@ struct sigaction __Context::Act_SIGBUS;
 struct sigaction __Context::Act_SIGFPE;
 struct sigaction __Context::Act_SIGSEGV;
 struct sigaction __Context::Act_SIGTERM;
+#endif
 
 void __Context::StaticInit()
 {
 	appUnixBootstrapDiagnosticRngSeed();
 
+#if !defined(__SWITCH__)
 	// Only try once.
 	INT DefaultFlag = SA_RESETHAND;
 
@@ -1381,6 +1438,7 @@ void __Context::StaticInit()
 	sigaction( SIGTERM, &Act_SIGTERM, 0 );
 
 	signal( SIGPIPE, SIG_IGN );
+#endif
 }
 
 void __Context::HandleSignal( int Sig )

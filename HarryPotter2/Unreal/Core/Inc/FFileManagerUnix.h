@@ -23,6 +23,15 @@
 #include <vector>
 #include "FFileManagerGeneric.h"
 
+#if defined(__SWITCH__)
+#ifndef fseeko
+#define fseeko fseek
+#endif
+#ifndef ftello
+#define ftello ftell
+#endif
+#endif
+
 namespace
 {
 	static UBOOL EncodeUnixArchiveName(
@@ -314,6 +323,15 @@ public:
 			WritePath=Existing;
 		else if( !RecoverPath(Path,1,WritePath,Ambiguous) || Ambiguous )
 			return WriterFailure(Filename,Flags,Error,TEXT("Failed to resolve output file name"));
+		if( !Exists )
+		{
+			std::string::size_type LastSlash = WritePath.find_last_of('/');
+			if( LastSlash != std::string::npos && LastSlash > 0 )
+			{
+				std::string ParentDir = WritePath.substr(0, LastSlash);
+				MakeDirectoryTree(ParentDir);
+			}
+		}
 		const char* Mode=(Flags&FILEWRITE_Append) ? "ab" : "wb";
 		FILE* File=fopen(WritePath.c_str(),Mode);
 		if( !File ) return WriterFailure(Filename,Flags,Error,TEXT("Failed to open file for writing"));
@@ -427,6 +445,7 @@ public:
 		if( !ToPath(Filename,Spec) ) return Result;
 		std::string::size_type Slash=Spec.find_last_of('/');
 		std::string Dir=Slash==std::string::npos?".":(Slash==0?"/":Spec.substr(0,Slash));
+		if( !Dir.empty() && Dir[Dir.size()-1] == ':' ) Dir += "/";
 		std::string Pattern=Slash==std::string::npos?Spec:Spec.substr(Slash+1);
 		if( Pattern.empty() ) Pattern="*";
 		DIR* Handle=opendir(Dir.c_str());
@@ -452,10 +471,18 @@ public:
 	{
 		std::string Path;
 		if( !ToPath(Filename,Path) ) return 0;
+		while( Path.size() > 1 && Path[Path.size()-1] == '/' && Path[Path.size()-2] != ':' )
+			Path.resize(Path.size() - 1);
 		if( chdir(Path.c_str())==0 ) return 1;
 		if( !MissingError() ) return 0;
 		std::string Recovered; UBOOL Ambiguous=0;
-		return RecoverPath(Path,0,Recovered,Ambiguous)&&chdir(Recovered.c_str())==0;
+		if( RecoverPath(Path,0,Recovered,Ambiguous) )
+		{
+			while( Recovered.size() > 1 && Recovered[Recovered.size()-1] == '/' && Recovered[Recovered.size()-2] != ':' )
+				Recovered.resize(Recovered.size() - 1);
+			return chdir(Recovered.c_str())==0;
+		}
+		return 0;
 	}
 	FString GetDefaultDirectory()
 	{
@@ -529,16 +556,51 @@ private:
 		return strcasecmp(A,B)==0;
 #endif
 	}
-	static std::vector<std::string> Parts( const std::string& Path )
+	static bool GetSchemePrefix( const std::string& Path, std::string& Prefix, size_t& AfterPrefix )
 	{
-		std::vector<std::string> Out; size_t P=0;
-		while(P<Path.size()) { while(P<Path.size()&&Path[P]=='/') ++P; size_t E=P; while(E<Path.size()&&Path[E]!='/') ++E; if(E>P) Out.push_back(Path.substr(P,E-P)); P=E; }
+		size_t Colon = Path.find(':');
+		if( Colon != std::string::npos && Colon > 0 )
+		{
+			bool Valid = true;
+			for( size_t i = 0; i < Colon; ++i )
+			{
+				if( !isalnum((unsigned char)Path[i]) && Path[i] != '_' )
+				{
+					Valid = false;
+					break;
+				}
+			}
+			if( Valid )
+			{
+				size_t Slashes = Colon + 1;
+				while( Slashes < Path.size() && Path[Slashes] == '/' )
+					Slashes++;
+				Prefix = Path.substr(0, Colon + 1) + "/";
+				AfterPrefix = Slashes;
+				return true;
+			}
+		}
+		return false;
+	}
+	static std::vector<std::string> Parts( const std::string& Path, size_t StartOffset = 0 )
+	{
+		std::vector<std::string> Out;
+		size_t P = StartOffset;
+		while( P < Path.size() )
+		{
+			while( P < Path.size() && Path[P] == '/' ) ++P;
+			size_t E = P;
+			while( E < Path.size() && Path[E] != '/' ) ++E;
+			if( E > P ) Out.push_back( Path.substr(P, E - P) );
+			P = E;
+		}
 		return Out;
 	}
 	static std::string Join( const std::string& Dir, const std::string& Name )
 	{
-		if(Dir=="/") return Dir+Name;
-		return Dir.empty()?Name:Dir+"/"+Name;
+		if( Dir.empty() ) return Name;
+		if( Dir[Dir.size() - 1] == '/' ) return Dir + Name;
+		return Dir + "/" + Name;
 	}
 	static void LogAmbiguous( const std::string& Dir, const std::string& Part )
 	{
@@ -548,23 +610,48 @@ private:
 	}
 	static UBOOL RecoverPath( const std::string& Input, UBOOL MissingLeaf, std::string& Output, UBOOL& Ambiguous )
 	{
-		Ambiguous=0; std::vector<std::string> Ps=Parts(Input); std::string Current=!Input.empty()&&Input[0]=='/'?"/":".";
-		for(size_t I=0;I<Ps.size();++I)
+		Ambiguous = 0;
+		std::string Prefix;
+		size_t AfterPrefix = 0;
+		std::string Current;
+		std::vector<std::string> Ps;
+		if( GetSchemePrefix(Input, Prefix, AfterPrefix) )
 		{
-			const std::string& Part=Ps[I];
-			if(Part=="."||Part=="..") { Current=Join(Current,Part); continue; }
-			std::string Candidate=Join(Current,Part); struct stat Info;
-			if(lstat(Candidate.c_str(),&Info)==0) { Current=Candidate; continue; }
-			DIR* H=opendir(Current.c_str()); if(!H) return 0;
-			std::string Match; INT Count=0;
-			while(struct dirent* E=readdir(H)) if(CaseEqual(E->d_name,Part.c_str())) { Match=E->d_name; ++Count; }
+			Current = Prefix;
+			Ps = Parts(Input, AfterPrefix);
+		}
+		else
+		{
+			Current = (!Input.empty() && Input[0] == '/') ? "/" : ".";
+			Ps = Parts(Input, 0);
+		}
+		for( size_t I = 0; I < Ps.size(); ++I )
+		{
+			const std::string& Part = Ps[I];
+			if( Part == "." || Part == ".." ) { Current = Join(Current, Part); continue; }
+			std::string Candidate = Join(Current, Part);
+			struct stat Info;
+			if( lstat(Candidate.c_str(), &Info) == 0 ) { Current = Candidate; continue; }
+			DIR* H = opendir(Current.c_str());
+			if( !H ) return 0;
+			std::string Match;
+			INT Count = 0;
+			while( struct dirent* E = readdir(H) )
+			{
+				if( CaseEqual(E->d_name, Part.c_str()) )
+				{
+					Match = E->d_name;
+					++Count;
+				}
+			}
 			closedir(H);
-			if(Count>1) { Ambiguous=1; LogAmbiguous(Current,Part); return 0; }
-			if(Count==1) { Current=Join(Current,Match); continue; }
-			if(MissingLeaf&&I+1==Ps.size()) { Current=Candidate; continue; }
+			if( Count > 1 ) { Ambiguous = 1; LogAmbiguous(Current, Part); return 0; }
+			if( Count == 1 ) { Current = Join(Current, Match); continue; }
+			if( MissingLeaf && I + 1 == Ps.size() ) { Current = Candidate; continue; }
 			return 0;
 		}
-		Output=Current; return 1;
+		Output = Current;
+		return 1;
 	}
 	static UBOOL ExistingPath( const std::string& Path, std::string& Existing, UBOOL& Ambiguous )
 	{
@@ -581,15 +668,41 @@ private:
 	static void MakeWritable( const std::string& Path ) { struct stat I; if(stat(Path.c_str(),&I)==0) chmod(Path.c_str(),I.st_mode|S_IRUSR|S_IWUSR); }
 	static UBOOL MakeDirectoryTree( const std::string& Input )
 	{
-		std::vector<std::string> Ps=Parts(Input); std::string Current=!Input.empty()&&Input[0]=='/'?"/":".";
-		for(size_t I=0;I<Ps.size();++I)
+		std::string Prefix;
+		size_t AfterPrefix = 0;
+		std::string Current;
+		std::vector<std::string> Ps;
+		if( GetSchemePrefix(Input, Prefix, AfterPrefix) )
 		{
-			if(Ps[I]=="."||Ps[I]=="..") { Current=Join(Current,Ps[I]); continue; }
-			std::string C=Join(Current,Ps[I]); struct stat Info;
-			if(stat(C.c_str(),&Info)==0) { if(!S_ISDIR(Info.st_mode)) return 0; Current=C; continue; }
-			std::string R; UBOOL A=0;
-			if(RecoverPath(C,0,R,A)) { if(!IsDirectory(R)) return 0; Current=R; continue; }
-			if(A||mkdir(C.c_str(),DirectoryMode())!=0) return 0; Current=C;
+			Current = Prefix;
+			Ps = Parts(Input, AfterPrefix);
+		}
+		else
+		{
+			Current = (!Input.empty() && Input[0] == '/') ? "/" : ".";
+			Ps = Parts(Input, 0);
+		}
+		for( size_t I = 0; I < Ps.size(); ++I )
+		{
+			if( Ps[I] == "." || Ps[I] == ".." ) { Current = Join(Current, Ps[I]); continue; }
+			std::string C = Join(Current, Ps[I]);
+			struct stat Info;
+			if( stat(C.c_str(), &Info) == 0 )
+			{
+				if( !S_ISDIR(Info.st_mode) ) return 0;
+				Current = C;
+				continue;
+			}
+			std::string R;
+			UBOOL A = 0;
+			if( RecoverPath(C, 0, R, A) )
+			{
+				if( !IsDirectory(R) ) return 0;
+				Current = R;
+				continue;
+			}
+			if( A || mkdir(C.c_str(), DirectoryMode()) != 0 ) return 0;
+			Current = C;
 		}
 		return 1;
 	}

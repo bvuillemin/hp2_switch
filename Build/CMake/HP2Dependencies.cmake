@@ -3,7 +3,7 @@ include(FetchContent)
 # Keep every dependency at the immutable commit recorded in
 # ThirdParty/sources.json. Updates are deliberate source changes, never moving
 # tags or branches.
-if(NOT EMSCRIPTEN)
+if(NOT EMSCRIPTEN AND NOT SWITCH)
     FetchContent_Declare(hp2_sdl2
         GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
         GIT_TAG 5d249570393f7a37e037abf22cd6012a4cc56a71
@@ -11,7 +11,7 @@ if(NOT EMSCRIPTEN)
         GIT_SUBMODULES ""
     )
 endif()
-if(NOT EMSCRIPTEN)
+if(NOT EMSCRIPTEN AND NOT SWITCH)
     FetchContent_Declare(hp2_openal_soft
         GIT_REPOSITORY https://github.com/kcat/openal-soft.git
         GIT_TAG b96a19cfd1705cc81b0bae78c782df1cd39966bd
@@ -19,18 +19,20 @@ if(NOT EMSCRIPTEN)
         GIT_SUBMODULES ""
     )
 endif()
-FetchContent_Declare(hp2_ogg
-    GIT_REPOSITORY https://github.com/xiph/ogg.git
-    GIT_TAG be05b13e98b048f0b5a0f5fa8ce514d56db5f822
-    GIT_SHALLOW FALSE
-    GIT_SUBMODULES ""
-)
-FetchContent_Declare(hp2_vorbis
-    GIT_REPOSITORY https://github.com/xiph/vorbis.git
-    GIT_TAG 0657aee69dec8508a0011f47f3b69d7538e9d262
-    GIT_SHALLOW FALSE
-    GIT_SUBMODULES ""
-)
+if(NOT SWITCH)
+    FetchContent_Declare(hp2_ogg
+        GIT_REPOSITORY https://github.com/xiph/ogg.git
+        GIT_TAG be05b13e98b048f0b5a0f5fa8ce514d56db5f822
+        GIT_SHALLOW FALSE
+        GIT_SUBMODULES ""
+    )
+    FetchContent_Declare(hp2_vorbis
+        GIT_REPOSITORY https://github.com/xiph/vorbis.git
+        GIT_TAG 0657aee69dec8508a0011f47f3b69d7538e9d262
+        GIT_SHALLOW FALSE
+        GIT_SUBMODULES ""
+    )
+endif()
 FetchContent_Declare(hp2_squish
     GIT_REPOSITORY https://github.com/svn2github/libsquish.git
     GIT_TAG c763145a30512c10450954b7a2b5b3a2f9a94e00
@@ -39,7 +41,7 @@ FetchContent_Declare(hp2_squish
 )
 # Runtime importer dependencies. All compression libraries are static and
 # narrowly configured; archive support is omitted from the Emscripten build.
-if(NOT EMSCRIPTEN)
+if(NOT EMSCRIPTEN AND NOT SWITCH)
     FetchContent_Declare(hp2_zlib
         GIT_REPOSITORY https://github.com/madler/zlib.git
         GIT_TAG da607da739fa6047df13e66a2af6b8bec7c2a498
@@ -66,14 +68,14 @@ FetchContent_Declare(hp2_imgui
     GIT_REPOSITORY https://github.com/ocornut/imgui.git
     GIT_TAG f1cc2ae15e53a861a874c3034aae6798fde194ab
 )
-if(NOT EMSCRIPTEN)
+if(NOT EMSCRIPTEN AND NOT SWITCH)
     FetchContent_Declare(hp2_nativefiledialog
         GIT_REPOSITORY https://github.com/btzy/nativefiledialog-extended.git
         GIT_TAG 65b2f070a0fcfee0d453a64e770a217ab0b6ff4f
     )
 endif()
 FetchContent_MakeAvailable(hp2_imgui)
-if(NOT EMSCRIPTEN)
+if(NOT EMSCRIPTEN AND NOT SWITCH)
     set(NFD_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     set(NFD_BUILD_SDL2_TESTS OFF CACHE BOOL "" FORCE)
     set(NFD_BUILD_SDL3_TESTS OFF CACHE BOOL "" FORCE)
@@ -125,7 +127,7 @@ endif()
 set(UTF8PROC_INSTALL OFF CACHE BOOL "" FORCE)
 set(UTF8PROC_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(hp2_utf8proc)
-if(NOT EMSCRIPTEN)
+if(NOT EMSCRIPTEN AND NOT SWITCH)
     set(ZLIB_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
     set(ZLIB_BUILD_TESTING OFF CACHE BOOL "" FORCE)
     set(ZLIB_BUILD_SHARED OFF CACHE BOOL "" FORCE)
@@ -239,6 +241,9 @@ target_compile_definitions(hp2_unshield PRIVATE PROTOTYPES=1)
 if(EMSCRIPTEN)
     target_compile_options(hp2_unshield PUBLIC "-sUSE_ZLIB=1")
     target_link_options(hp2_unshield PUBLIC "-sUSE_ZLIB=1")
+elseif(SWITCH)
+    target_include_directories(hp2_unshield PRIVATE "$ENV{DEVKITPRO}/portlibs/switch/include")
+    target_link_libraries(hp2_unshield PUBLIC -lz)
 else()
     target_link_libraries(hp2_unshield PUBLIC zlibstatic)
     target_include_directories(hp2_unshield PRIVATE "${hp2_zlib_SOURCE_DIR}" "${hp2_zlib_BINARY_DIR}")
@@ -247,7 +252,13 @@ endif()
 
 # SDL2 is linked statically; its tests, examples, and install surface are not
 # part of the HP2 graph.
-if(NOT EMSCRIPTEN)
+if(SWITCH)
+    add_library(SDL2::SDL2-static INTERFACE IMPORTED)
+    set_target_properties(SDL2::SDL2-static PROPERTIES
+        INTERFACE_INCLUDE_DIRECTORIES "$ENV{DEVKITPRO}/portlibs/switch/include/SDL2;$ENV{DEVKITPRO}/portlibs/switch/include"
+        INTERFACE_LINK_LIBRARIES "-L$ENV{DEVKITPRO}/portlibs/switch/lib;-lSDL2"
+    )
+elseif(NOT EMSCRIPTEN)
     set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build static third-party libraries" FORCE)
     set(SDL_SHARED OFF CACHE BOOL "" FORCE)
     set(SDL_STATIC ON CACHE BOOL "" FORCE)
@@ -269,21 +280,44 @@ endif()
 # Ogg and Vorbis are both static. Vorbis ships a FindOgg module that takes
 # precedence over OggConfig.cmake, so seed its cache variables with the pinned
 # in-tree target and headers.
-set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build static third-party libraries" FORCE)
-set(BUILD_FRAMEWORK OFF CACHE BOOL "" FORCE)
-set(INSTALL_DOCS OFF CACHE BOOL "" FORCE)
-set(INSTALL_PKG_CONFIG_MODULE OFF CACHE BOOL "" FORCE)
-set(INSTALL_CMAKE_PACKAGE_MODULE ON CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(hp2_ogg)
-set(Ogg_DIR "${hp2_ogg_BINARY_DIR}" CACHE PATH "Pinned in-tree Ogg package" FORCE)
-set(OGG_LIBRARY ogg CACHE STRING "Pinned in-tree Ogg target" FORCE)
-set(OGG_INCLUDE_DIR "${hp2_ogg_SOURCE_DIR}/include" CACHE PATH
-    "Pinned in-tree Ogg headers" FORCE)
+if(SWITCH)
+    add_library(ogg INTERFACE IMPORTED)
+    set_target_properties(ogg PROPERTIES
+        INTERFACE_INCLUDE_DIRECTORIES "$ENV{DEVKITPRO}/portlibs/switch/include"
+        INTERFACE_LINK_LIBRARIES "-L$ENV{DEVKITPRO}/portlibs/switch/lib;-logg"
+    )
+    add_library(Ogg::ogg INTERFACE IMPORTED)
+    set_target_properties(Ogg::ogg PROPERTIES
+        INTERFACE_INCLUDE_DIRECTORIES "$ENV{DEVKITPRO}/portlibs/switch/include"
+        INTERFACE_LINK_LIBRARIES "-L$ENV{DEVKITPRO}/portlibs/switch/lib;-logg"
+    )
+    add_library(vorbis INTERFACE IMPORTED)
+    set_target_properties(vorbis PROPERTIES
+        INTERFACE_INCLUDE_DIRECTORIES "$ENV{DEVKITPRO}/portlibs/switch/include"
+        INTERFACE_LINK_LIBRARIES "-L$ENV{DEVKITPRO}/portlibs/switch/lib;-lvorbis;-logg"
+    )
+    add_library(vorbisfile INTERFACE IMPORTED)
+    set_target_properties(vorbisfile PROPERTIES
+        INTERFACE_INCLUDE_DIRECTORIES "$ENV{DEVKITPRO}/portlibs/switch/include"
+        INTERFACE_LINK_LIBRARIES "-L$ENV{DEVKITPRO}/portlibs/switch/lib;-lvorbisfile;-lvorbis;-logg"
+    )
+else()
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build static third-party libraries" FORCE)
+    set(BUILD_FRAMEWORK OFF CACHE BOOL "" FORCE)
+    set(INSTALL_DOCS OFF CACHE BOOL "" FORCE)
+    set(INSTALL_PKG_CONFIG_MODULE OFF CACHE BOOL "" FORCE)
+    set(INSTALL_CMAKE_PACKAGE_MODULE ON CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(hp2_ogg)
+    set(Ogg_DIR "${hp2_ogg_BINARY_DIR}" CACHE PATH "Pinned in-tree Ogg package" FORCE)
+    set(OGG_LIBRARY ogg CACHE STRING "Pinned in-tree Ogg target" FORCE)
+    set(OGG_INCLUDE_DIR "${hp2_ogg_SOURCE_DIR}/include" CACHE PATH
+        "Pinned in-tree Ogg headers" FORCE)
 
-set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build static third-party libraries" FORCE)
-set(BUILD_FRAMEWORK OFF CACHE BOOL "" FORCE)
-set(INSTALL_CMAKE_PACKAGE_MODULE OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(hp2_vorbis)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build static third-party libraries" FORCE)
+    set(BUILD_FRAMEWORK OFF CACHE BOOL "" FORCE)
+    set(INSTALL_CMAKE_PACKAGE_MODULE OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(hp2_vorbis)
+endif()
 
 # The immutable Squish revision defaults to x86 SSE2. Disable that code path on
 # arm64 and expose a namespaced alias for the HP2 target declarations.
@@ -298,7 +332,13 @@ endif()
 
 # OpenAL Soft remains a replaceable shared dylib; no utilities, examples, or
 # test programs are added to this graph.
-if(NOT EMSCRIPTEN)
+if(SWITCH)
+    add_library(OpenAL::OpenAL INTERFACE IMPORTED)
+    set_target_properties(OpenAL::OpenAL PROPERTIES
+        INTERFACE_INCLUDE_DIRECTORIES "$ENV{DEVKITPRO}/portlibs/switch/include"
+        INTERFACE_LINK_LIBRARIES "-L$ENV{DEVKITPRO}/portlibs/switch/lib;-lopenal"
+    )
+elseif(NOT EMSCRIPTEN)
     set(LIBTYPE SHARED CACHE STRING "OpenAL Soft library type" FORCE)
     set(ALSOFT_UTILS OFF CACHE BOOL "" FORCE)
     set(ALSOFT_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -476,6 +516,12 @@ if(EMSCRIPTEN)
     add_library(OpenGL::GL INTERFACE IMPORTED)
     set_target_properties(OpenGL::GL PROPERTIES INTERFACE_LINK_OPTIONS
         "-sMIN_WEBGL_VERSION=2;-sMAX_WEBGL_VERSION=2;-sGL_ENABLE_GET_PROC_ADDRESS=1"
+    )
+elseif(SWITCH)
+    add_library(OpenGL::GL INTERFACE IMPORTED)
+    set_target_properties(OpenGL::GL PROPERTIES
+        INTERFACE_INCLUDE_DIRECTORIES "$ENV{DEVKITPRO}/portlibs/switch/include"
+        INTERFACE_LINK_LIBRARIES "-L$ENV{DEVKITPRO}/portlibs/switch/lib;-lEGL;-lglapi;-lglad;-ldrm_nouveau"
     )
 else()
     find_package(OpenGL REQUIRED)

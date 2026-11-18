@@ -9,6 +9,9 @@
 #include "FConfigCacheIni.h"
 #include <errno.h>
 #include <string.h>
+#if defined(__SWITCH__)
+	#include <switch.h>
+#endif
 #if __UNIX__
 	#include <sys/wait.h>
 	#include <unistd.h>
@@ -353,6 +356,120 @@ void USDLViewport::UpdateInput( UBOOL Reset )
 
 	if( Reset )
 		ReleaseAllInput();
+
+#if defined(__SWITCH__)
+	static PadState s_SwitchPad;
+	static bool s_SwitchPadInit = false;
+	static bool s_PrevW = false, s_PrevS = false, s_PrevA = false, s_PrevD = false;
+
+	if( Reset )
+	{
+		s_PrevW = s_PrevS = s_PrevA = s_PrevD = false;
+	}
+
+	if( !s_SwitchPadInit )
+	{
+		padConfigureInput( 1, HidNpadStyleSet_NpadStandard );
+		padInitializeAny( &s_SwitchPad );
+		s_SwitchPadInit = true;
+	}
+
+	padUpdate( &s_SwitchPad );
+	const u64 kDown = padGetButtonsDown( &s_SwitchPad );
+	const u64 kUp   = padGetButtonsUp( &s_SwitchPad );
+
+	auto HandleBtn = [this, kDown, kUp]( u64 Mask, EInputKey Key )
+	{
+		if( Key == IK_None ) return;
+		if( kDown & Mask )
+			CauseInputEvent( Key, IST_Press, 0.f );
+		if( kUp & Mask )
+			CauseInputEvent( Key, IST_Release, 0.f );
+	};
+
+	// Triggers and Bumpers:
+	// ZL for left click (use wand)
+	HandleBtn( HidNpadButton_ZL, IK_LeftMouse );
+	// ZR for right click (jump)
+	HandleBtn( HidNpadButton_ZR, IK_RightMouse );
+	// L for Potion (Space / Q)
+	HandleBtn( HidNpadButton_L, IK_Space );
+	// R for Broom action / Ctrl
+	HandleBtn( HidNpadButton_R, IK_Ctrl );
+
+	// Face buttons:
+	HandleBtn( HidNpadButton_A, IK_LeftMouse ); // Interact / Cast
+	HandleBtn( HidNpadButton_B, IK_RightMouse ); // Jump / Cancel
+	HandleBtn( HidNpadButton_X, IK_Tab );        // Open Map / Folio Magi
+	HandleBtn( HidNpadButton_Y, IK_Q );          // Drink Wiggenwell Potion
+
+	// System / Menu buttons:
+	// Minus (-) as enter to skip cutscenes
+	HandleBtn( HidNpadButton_Minus, IK_Enter );
+	// Plus (+) as esc to pause
+	HandleBtn( HidNpadButton_Plus, IK_Escape );
+
+	// D-Pad as arrow keys
+	HandleBtn( HidNpadButton_Up,    IK_Up );
+	HandleBtn( HidNpadButton_Down,  IK_Down );
+	HandleBtn( HidNpadButton_Left,  IK_Left );
+	HandleBtn( HidNpadButton_Right, IK_Right );
+
+	// Stick clicks:
+	HandleBtn( HidNpadButton_StickL, IK_Shift ); // Walk / Sneak
+	HandleBtn( HidNpadButton_StickR, IK_Alt );   // Free look / center
+
+	// Left stick for movement (forward, backward, strafe left and right -> W, S, A, D)
+	HidAnalogStickState l_stick = padGetStickPos( &s_SwitchPad, 0 );
+	const s32 MOVE_DEADZONE = 8000;
+	bool curW = (l_stick.y > MOVE_DEADZONE);
+	bool curS = (l_stick.y < -MOVE_DEADZONE);
+	bool curA = (l_stick.x < -MOVE_DEADZONE);
+	bool curD = (l_stick.x > MOVE_DEADZONE);
+
+	if( curW != s_PrevW )
+	{
+		CauseInputEvent( IK_W, curW ? IST_Press : IST_Release, 0.f );
+		s_PrevW = curW;
+	}
+	if( curS != s_PrevS )
+	{
+		CauseInputEvent( IK_S, curS ? IST_Press : IST_Release, 0.f );
+		s_PrevS = curS;
+	}
+	if( curA != s_PrevA )
+	{
+		CauseInputEvent( IK_A, curA ? IST_Press : IST_Release, 0.f );
+		s_PrevA = curA;
+	}
+	if( curD != s_PrevD )
+	{
+		CauseInputEvent( IK_D, curD ? IST_Press : IST_Release, 0.f );
+		s_PrevD = curD;
+	}
+
+	// Right stick for camera movement (Mouse look)
+	HidAnalogStickState r_stick = padGetStickPos( &s_SwitchPad, 1 );
+	const s32 CAM_DEADZONE = 4000;
+	FLOAT camDeltaX = 0.f;
+	FLOAT camDeltaY = 0.f;
+	if( r_stick.x > CAM_DEADZONE || r_stick.x < -CAM_DEADZONE )
+	{
+		FLOAT raw = (r_stick.x > 0) ? (r_stick.x - CAM_DEADZONE) : (r_stick.x + CAM_DEADZONE);
+		FLOAT norm = raw / (32767.f - CAM_DEADZONE);
+		camDeltaX = norm * 20.0f;
+	}
+	if( r_stick.y > CAM_DEADZONE || r_stick.y < -CAM_DEADZONE )
+	{
+		FLOAT raw = (r_stick.y > 0) ? (r_stick.y - CAM_DEADZONE) : (r_stick.y + CAM_DEADZONE);
+		FLOAT norm = raw / (32767.f - CAM_DEADZONE);
+		camDeltaY = norm * 20.0f;
+	}
+	if( camDeltaX != 0.f )
+		CauseInputEvent( IK_MouseX, IST_Axis, camDeltaX );
+	if( camDeltaY != 0.f )
+		CauseInputEvent( IK_MouseY, IST_Axis, camDeltaY );
+#endif
 
 	// Relative mouse deltas are sampled once per pump while grabbed.
 	if( MouseIsGrabbed && SdlWindow )
