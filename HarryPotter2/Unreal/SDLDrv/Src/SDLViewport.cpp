@@ -3,6 +3,7 @@
 =============================================================================*/
 
 #include "SDLDrv.h"
+#include "UnCon.h"
 #include "HP2InputEvents.h"
 #include "HP2MouseCapturePolicy.h"
 #include "UnRenDev.h"
@@ -425,13 +426,39 @@ void USDLViewport::UpdateInput( UBOOL Reset )
 	const s32 MOVE_DEADZONE = 8000;
 	const s32 CAM_DEADZONE = 4000;
 
-	const bool bInMenu = bShowWindowsMouse || !MouseIsGrabbed || bWindowsMouseAvailable || (Actor && Actor->bShowMenu) || (Actor && Actor->Level && Actor->Level->Pauser != TEXT(""));
+	const bool bInMenu = bShowWindowsMouse || !MouseIsGrabbed || (Actor && Actor->bShowMenu) || (Actor && Actor->Level && Actor->Level->Pauser != TEXT(""));
 
 	if( bInMenu )
 	{
-		bWindowsMouseAvailable = 1;
+		bWindowsMouseAvailable = 0;
+
+		UConsole* Con = (Actor && Actor->Player) ? Actor->Player->Console : NULL;
+		UFloatProperty* PropX = Con ? FindField<UFloatProperty>( Con->GetClass(), TEXT("MouseX") ) : NULL;
+		UFloatProperty* PropY = Con ? FindField<UFloatProperty>( Con->GetClass(), TEXT("MouseY") ) : NULL;
+		FLOAT* pMouseX = (Con && PropX) ? (FLOAT*)((BYTE*)Con + PropX->Offset) : NULL;
+		FLOAT* pMouseY = (Con && PropY) ? (FLOAT*)((BYTE*)Con + PropY->Offset) : NULL;
+
+		UObjectProperty* PropRoot = Con ? FindField<UObjectProperty>( Con->GetClass(), TEXT("Root") ) : NULL;
+		UObject* RootObj = (Con && PropRoot) ? *(UObject**)((BYTE*)Con + PropRoot->Offset) : NULL;
+		FLOAT WinWidth = 640.0f;
+		FLOAT WinHeight = 480.0f;
+		if( RootObj )
+		{
+			UFloatProperty* PropW = FindField<UFloatProperty>( RootObj->GetClass(), TEXT("WinWidth") );
+			UFloatProperty* PropH = FindField<UFloatProperty>( RootObj->GetClass(), TEXT("WinHeight") );
+			if( PropW ) WinWidth = *(FLOAT*)((BYTE*)RootObj + PropW->Offset);
+			if( PropH ) WinHeight = *(FLOAT*)((BYTE*)RootObj + PropH->Offset);
+		}
+		if( WinWidth <= 0.0f ) WinWidth = 640.0f;
+		if( WinHeight <= 0.0f ) WinHeight = 480.0f;
 
 		// Center mouse initially if at origin
+		if( pMouseX && pMouseY && *pMouseX <= 0.0f && *pMouseY <= 0.0f )
+		{
+			*pMouseX = WinWidth * 0.5f;
+			*pMouseY = WinHeight * 0.5f;
+		}
+
 		if( WindowsMouseX <= 0.0f && WindowsMouseY <= 0.0f )
 		{
 			WindowsMouseX = (FLOAT)(SizeX > 0 ? SizeX : 1024) * 0.5f;
@@ -454,17 +481,25 @@ void USDLViewport::UpdateInput( UBOOL Reset )
 
 		if( curDeltaX != 0.f || curDeltaY != 0.f )
 		{
-			const FLOAT CursorSpeed = 14.0f;
-			WindowsMouseX += curDeltaX * CursorSpeed;
-			WindowsMouseY -= curDeltaY * CursorSpeed; // Stick UP moves cursor UP (decrease Y)
+			const FLOAT CursorSpeed = 10.0f;
+			if( pMouseX && pMouseY )
+			{
+				*pMouseX += curDeltaX * CursorSpeed;
+				*pMouseY -= curDeltaY * CursorSpeed; // Stick UP moves cursor UP (decrease Y)
+				*pMouseX = Clamp( *pMouseX, 0.0f, WinWidth );
+				*pMouseY = Clamp( *pMouseY, 0.0f, WinHeight );
+			}
+
+			WindowsMouseX += curDeltaX * (CursorSpeed * 1.5f);
+			WindowsMouseY -= curDeltaY * (CursorSpeed * 1.5f);
 			WindowsMouseX = Clamp( WindowsMouseX, 0.0f, (FLOAT)(SizeX > 0 ? SizeX : 1024) );
 			WindowsMouseY = Clamp( WindowsMouseY, 0.0f, (FLOAT)(SizeY > 0 ? SizeY : 768) );
 			if( C->Engine )
 				C->Engine->MousePosition( this, (kDown & (HidNpadButton_A | HidNpadButton_ZL)) ? 1 : 0, WindowsMouseX, WindowsMouseY );
 
 			// Also send mouse deltas so menus polling relative input track the motion
-			CauseInputEvent( IK_MouseX, IST_Axis, curDeltaX * CursorSpeed );
-			CauseInputEvent( IK_MouseY, IST_Axis, -curDeltaY * CursorSpeed );
+			CauseInputEvent( IK_MouseX, IST_Axis, curDeltaX * 15.0f );
+			CauseInputEvent( IK_MouseY, IST_Axis, curDeltaY * 15.0f );
 		}
 
 		// Release any gameplay movement keys if menu was opened while moving
@@ -766,7 +801,11 @@ void USDLViewport::UpdateMouseGrabState( UBOOL Capture )
 	// cursor would never move. Mirrors UWindowsViewport::SetMouseCapture. Assign
 	// above the early return so cold start (MouseIsGrabbed(0) at construction)
 	// still sets the flag on the first UpdateMouseGrabState(0) call.
+#if defined(__SWITCH__)
+	bWindowsMouseAvailable = 0;
+#else
 	bWindowsMouseAvailable = !Capture;
+#endif
 	if( Capture == (INT)MouseIsGrabbed )
 		return; // No transition; cursor visibility must stay untouched.
 
