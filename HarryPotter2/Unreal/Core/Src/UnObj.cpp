@@ -3155,9 +3155,18 @@ UBOOL UObject::SavePackage( UObject* InOuter, UObject* Base, DWORD TopLevelFlags
 		debugf( NAME_Log, TEXT("Moving '%s' to '%s'"), TempFilename, Filename );
 		if( !GFileManager->Move( Filename, TempFilename ) )
 		{
-			GFileManager->Delete( TempFilename );
-			GWarn->Logf( LocalizeError("SaveWarning"), Filename );
-			Success = 0;
+			GFileManager->Delete( Filename, 0, 1 );
+			if( GFileManager->Move( Filename, TempFilename ) ||
+			    (GFileManager->Copy( Filename, TempFilename, 1, 1, 0, NULL ) && GFileManager->Delete( TempFilename, 1, 1 )) )
+			{
+				debugf( NAME_Log, TEXT("Moved '%s' to '%s' via fallback"), TempFilename, Filename );
+			}
+			else
+			{
+				GFileManager->Delete( TempFilename );
+				GWarn->Logf( LocalizeError("SaveWarning"), Filename );
+				Success = 0;
+			}
 		}
 	}
 	return Success;

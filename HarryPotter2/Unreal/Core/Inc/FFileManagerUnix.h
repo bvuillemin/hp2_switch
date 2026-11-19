@@ -388,8 +388,10 @@ public:
 		if( Ambiguous || (!Replace&&Exists) ) return 0;
 		if( EvenIfReadOnly&&Exists ) MakeWritable(ExistingD);
 		if( !Exists && (!RecoverPath(D,1,ExistingD,Ambiguous)||Ambiguous) ) return 0;
+		if( Replace && Exists )
+			unlink(ExistingD.c_str());
 		if( rename(ExistingS.c_str(),ExistingD.c_str())==0 ) return 1;
-		if( errno==EXDEV ) return Copy(Dest,Src,Replace,EvenIfReadOnly,Attributes,NULL)&&Delete(Src,1,1);
+		return Copy(Dest,Src,Replace,EvenIfReadOnly,Attributes,NULL)&&Delete(Src,1,1);
 		return 0;
 	}
 	UBOOL Delete( const TCHAR* Filename, UBOOL RequireExists=0, UBOOL EvenReadOnly=0 )
