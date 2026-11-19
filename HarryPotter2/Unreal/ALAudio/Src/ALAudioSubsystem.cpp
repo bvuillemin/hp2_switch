@@ -188,7 +188,11 @@ UBOOL UALAudioSubsystem::Init()
 		return 0;
 	}
 
+#if defined(__SWITCH__)
+	INT Caps[] = { ALC_FREQUENCY, 48000, 0 };
+#else
 	INT Caps[] = { ALC_FREQUENCY, 44100, 0 };
+#endif
 	SoundContext = alcCreateContext( SoundDevice, Caps );
 	if (!SoundContext)
 	{
@@ -229,6 +233,47 @@ UBOOL UALAudioSubsystem::Init()
 	{
 		debugf(NAME_Init,TEXT("ALAudio: couldn't allocate sources"));
 		return 0;
+	}
+
+	// Enable high-quality sinc/cubic resampler if OpenAL Soft supports AL_SOFT_source_resampler
+	if ( alIsExtensionPresent("AL_SOFT_source_resampler") )
+	{
+		enum {
+			AL_NUM_RESAMPLERS_SOFT_ID = 0x1210,
+			AL_DEFAULT_RESAMPLER_SOFT_ID = 0x1211,
+			AL_SOURCE_RESAMPLER_SOFT_ID = 0x1212,
+			AL_RESAMPLER_NAME_SOFT_ID = 0x1213
+		};
+		typedef const char* (AL_APIENTRY* LPALGETSTRINGISOFT)(ALenum pname, ALsizei index);
+		LPALGETSTRINGISOFT alGetStringiSOFT_fn = (LPALGETSTRINGISOFT)alGetProcAddress("alGetStringiSOFT");
+		ALint numResamplers = 0;
+		alGetIntegerv(AL_NUM_RESAMPLERS_SOFT_ID, &numResamplers);
+		ALint bestResampler = -1;
+		for (ALint r = 0; r < numResamplers; ++r)
+		{
+			const char* name = alGetStringiSOFT_fn ? alGetStringiSOFT_fn(AL_RESAMPLER_NAME_SOFT_ID, r) : NULL;
+			if (name)
+			{
+				if (appStricmp(ANSI_TO_TCHAR(name), TEXT("bsinc12")) == 0 ||
+					appStricmp(ANSI_TO_TCHAR(name), TEXT("fast_bsinc12")) == 0)
+				{
+					bestResampler = r;
+					break;
+				}
+				else if (bestResampler == -1 && appStricmp(ANSI_TO_TCHAR(name), TEXT("cubic")) == 0)
+				{
+					bestResampler = r;
+				}
+			}
+		}
+		if (bestResampler >= 0)
+		{
+			for (INT i = 0; i < Sources.Num(); ++i)
+			{
+				alSourcei(Sources(i).Source, AL_SOURCE_RESAMPLER_SOFT_ID, bestResampler);
+			}
+			debugf(NAME_Init, TEXT("ALAudio: Enabled high-quality audio resampler %d on %d sources"), bestResampler, Sources.Num());
+		}
 	}
 
 	// Initialize streams.

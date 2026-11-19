@@ -258,6 +258,12 @@ def main():
         elif os.path.isfile(src_item):
             shutil.copy2(src_item, dst_item)
 
+    # Copy alsoft.conf if present in packaging
+    alsoft_conf = os.path.join(PACKAGING_DIR, "alsoft.conf")
+    if os.path.isfile(alsoft_conf):
+        shutil.copy2(alsoft_conf, os.path.join(stage_romfs, "alsoft.conf"))
+        print("  Staged alsoft.conf into RomFS.")
+
     print("\n[3/4] Packaging Standalone NSP with hacbrewpack...")
     os.makedirs(out_dir, exist_ok=True)
     cmd = [

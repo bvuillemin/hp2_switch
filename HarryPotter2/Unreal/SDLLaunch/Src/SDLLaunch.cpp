@@ -118,6 +118,7 @@ extern "C" void SwitchApplyPerformanceProfile( void )
 	setenv( "MESA_GLSL_CACHE_DIR", CacheDir, 1 );
 	setenv( "MESA_GLSL_CACHE_MAX_SIZE", "128MB", 1 );
 	setenv( "XDG_CACHE_HOME", XdgCache, 1 );
+	setenv( "ALSOFT_CONF", "romfs:/alsoft.conf", 1 );
 
 	// 2. APM: GPU performance configuration
 	// 0x00020004: Official Boost handheld profile (GPU 384 MHz, EMC 1600 MHz)
