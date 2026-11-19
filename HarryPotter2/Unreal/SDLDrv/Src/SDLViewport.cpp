@@ -410,6 +410,10 @@ void USDLViewport::UpdateInput( UBOOL Reset )
 			bool HasSave0 = false;
 			std::string FoundPath = "";
 			std::string CandidatePaths[] = {
+				"save:/User/Save/Slot0/Save0.usa",
+				"save:/User/Save/Save0.usa",
+				"save:/Save/Slot0/Save0.usa",
+				"save:/Save/Save0.usa",
 				"sdmc:/switch/hp2/User/Save/Slot0/Save0.usa",
 				"sdmc:/switch/hp2/User/Save/Save0.usa",
 				"User/Save/Slot0/Save0.usa",

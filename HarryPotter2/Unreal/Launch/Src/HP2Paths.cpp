@@ -22,6 +22,7 @@
 #endif
 #if defined(__SWITCH__)
 extern "C" void SwitchLog(const char* Fmt, ...);
+extern "C" bool GSwitchHasInternalSave;
 #endif
 #if HP2_WINDOWS
 #include <shlobj.h>
@@ -110,7 +111,7 @@ char* CanonicalizeExistingDirectory(const char* Directory);
 #if defined(__SWITCH__)
 char* ResolveDataHomePrefix()
 {
-	const char* SwitchRoot = "sdmc:/switch/hp2";
+	const char* SwitchRoot = GSwitchHasInternalSave ? "save:" : "sdmc:/switch/hp2";
 	size_t Length = std::strlen(SwitchRoot);
 	char* Copy = static_cast<char*>(std::malloc(Length + 1));
 	if (Copy)
@@ -224,6 +225,12 @@ bool IsDirectory(const char* Directory)
 	if (!Directory)
 		return false;
 #if defined(__SWITCH__)
+	if (std::strcmp(Directory, "romfs:/") == 0 || std::strcmp(Directory, "romfs:") == 0 ||
+	    std::strcmp(Directory, "save:/") == 0 || std::strcmp(Directory, "save:") == 0 ||
+	    std::strcmp(Directory, "sdmc:/") == 0 || std::strcmp(Directory, "sdmc:") == 0)
+	{
+		return true;
+	}
 	struct stat St;
 	if (stat(Directory, &St) == 0 && S_ISDIR(St.st_mode))
 		return true;
@@ -1545,6 +1552,22 @@ bool GetHP2ConventionalPrototypeDataRoot(std::string& AbsoluteRoot)
 bool DiscoverHP2RetailDataRoot(std::string& CanonicalRoot)
 {
 	CanonicalRoot.clear();
+#if defined(__SWITCH__)
+	char* RomfsRoot = ValidateDataRoot("romfs:/");
+	if (RomfsRoot)
+	{
+		CanonicalRoot = RomfsRoot;
+		std::free(RomfsRoot);
+		return true;
+	}
+	char* SdmcRoot = ValidateDataRoot("sdmc:/switch/hp2");
+	if (SdmcRoot)
+	{
+		CanonicalRoot = SdmcRoot;
+		std::free(SdmcRoot);
+		return true;
+	}
+#endif
 	char* Home = ResolveDataHomePrefix();
 	if (!Home)
 		return false;

@@ -23,7 +23,13 @@ cmake --preset switch-arm64 "$@"
 echo "=== BUILD HARRY POTTER 2 NRO ==="
 cmake --build --preset switch-arm64 --target HarryPotter2
 
+if [ -f "out/switch-arm64/hp2_game.elf" ]; then
+    echo "=== GENERATE NSO (main) ==="
+    elf2nso out/switch-arm64/hp2_game.elf out/switch-arm64/main
+fi
+
 if [ -f "out/switch-arm64/HarryPotter2.nro" ]; then
     echo "=== SUCCESS ==="
-    echo "Built: out/switch-arm64/HarryPotter2.nro"
+    echo "Built NRO: out/switch-arm64/HarryPotter2.nro"
+    echo "Built NSO: out/switch-arm64/main"
 fi

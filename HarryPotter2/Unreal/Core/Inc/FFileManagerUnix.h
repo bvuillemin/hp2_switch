@@ -220,6 +220,10 @@ private:
 	off_t Pos;
 };
 
+#if defined(__SWITCH__)
+extern "C" void SwitchCommitSaveData( void );
+#endif
+
 class FArchiveFileWriterUnix : public FArchive
 {
 public:
@@ -249,6 +253,9 @@ public:
 			Flush();
 			if( fclose(File) != 0 ) Fail(TEXT("POSIX file-writer close failed"));
 			File = NULL;
+#if defined(__SWITCH__)
+			SwitchCommitSaveData();
+#endif
 		}
 		return !ArIsError;
 	}
@@ -390,8 +397,18 @@ public:
 		if( !Exists && (!RecoverPath(D,1,ExistingD,Ambiguous)||Ambiguous) ) return 0;
 		if( Replace && Exists )
 			unlink(ExistingD.c_str());
-		if( rename(ExistingS.c_str(),ExistingD.c_str())==0 ) return 1;
-		return Copy(Dest,Src,Replace,EvenIfReadOnly,Attributes,NULL)&&Delete(Src,1,1);
+		if( rename(ExistingS.c_str(),ExistingD.c_str())==0 )
+		{
+#if defined(__SWITCH__)
+			SwitchCommitSaveData();
+#endif
+			return 1;
+		}
+		UBOOL MoveRes = Copy(Dest,Src,Replace,EvenIfReadOnly,Attributes,NULL)&&Delete(Src,1,1);
+#if defined(__SWITCH__)
+		if( MoveRes ) SwitchCommitSaveData();
+#endif
+		return MoveRes;
 		return 0;
 	}
 	UBOOL Delete( const TCHAR* Filename, UBOOL RequireExists=0, UBOOL EvenReadOnly=0 )
@@ -399,7 +416,13 @@ public:
 		std::string Path;
 		if( !ToPath(Filename,Path) ) return 0;
 		if( EvenReadOnly ) MakeWritable(Path);
-		if( unlink(Path.c_str())==0 ) return 1;
+		if( unlink(Path.c_str())==0 )
+		{
+#if defined(__SWITCH__)
+			SwitchCommitSaveData();
+#endif
+			return 1;
+		}
 		if( !MissingError() ) return 0;
 		std::string Recovered; UBOOL Ambiguous=0;
 		if( !RecoverPath(Path,0,Recovered,Ambiguous) ) return !RequireExists&&!Ambiguous;

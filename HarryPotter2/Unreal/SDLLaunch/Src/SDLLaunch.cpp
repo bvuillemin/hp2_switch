@@ -162,6 +162,75 @@ extern "C" void SwitchRestorePerformanceProfile( void )
 	}
 }
 
+extern "C" bool GSwitchHasInternalSave = false;
+
+extern "C" void SwitchCommitSaveData( void )
+{
+#if defined(__SWITCH__)
+	if( GSwitchHasInternalSave )
+	{
+		fsdevCommitDevice( "save" );
+	}
+#endif
+}
+
+extern "C" void SwitchInitSaveData( void )
+{
+#if defined(__SWITCH__)
+	romfsInit();
+	AccountUid uid = {0};
+	if( R_SUCCEEDED(accountInitialize(AccountServiceType_Application)) )
+	{
+		if( R_FAILED(accountGetPreselectedUser(&uid)) )
+			accountGetLastOpenedUser(&uid);
+		accountExit();
+	}
+	u64 app_id = 0x0100485032000000ULL;
+	Result rc = fsdevMountSaveData( "save", app_id, uid );
+	if( R_FAILED(rc) )
+		rc = fsdevMountDeviceSaveData( "save", app_id );
+	if( R_FAILED(rc) )
+	{
+		FsSaveDataAttribute attr;
+		FsSaveDataCreationInfo info;
+		FsSaveDataMetaInfo meta;
+		memset(&attr, 0, sizeof(attr));
+		memset(&info, 0, sizeof(info));
+		memset(&meta, 0, sizeof(meta));
+
+		attr.application_id = app_id;
+		attr.uid = uid;
+		attr.save_data_type = FsSaveDataType_Account;
+		attr.save_data_rank = FsSaveDataRank_Primary;
+
+		info.save_data_size = 32 * 1024 * 1024; // 32MB save allocation
+		info.journal_size = 32 * 1024 * 1024;
+		info.owner_id = app_id;
+		info.save_data_space_id = FsSaveDataSpaceId_User;
+
+		fsCreateSaveDataFileSystem(&attr, &info, &meta);
+		rc = fsdevMountSaveData( "save", app_id, uid );
+	}
+
+	if( R_SUCCEEDED(rc) )
+	{
+		GSwitchHasInternalSave = true;
+		SwitchLog( "[SWITCH SAVE] Successfully mounted internal save data to 'save:/'\n" );
+		mkdir( "save:/User", 0777 );
+		mkdir( "save:/User/Save", 0777 );
+		mkdir( "save:/User/Save/Slot0", 0777 );
+		mkdir( "save:/User/Save/cache", 0777 );
+		mkdir( "save:/User/Cache", 0777 );
+		fsdevCommitDevice( "save" );
+	}
+	else
+	{
+		GSwitchHasInternalSave = false;
+		SwitchLog( "[SWITCH SAVE] Internal save mount failed (0x%x). Running in NRO mode ('sdmc:/switch/hp2/User/Save')\n", rc );
+	}
+#endif
+}
+
 class FSwitchEarlyMalloc final : public FMalloc
 {
 public:
@@ -5545,6 +5614,12 @@ void CleanUpOnExit( UEngine* Engine )
 		Engine->Exit();
 	appPreExit();
 #if defined(__SWITCH__)
+	SwitchCommitSaveData();
+	if( GSwitchHasInternalSave )
+	{
+		fsdevUnmountDevice( "save" );
+	}
+	romfsExit();
 	SwitchRestorePerformanceProfile();
 #endif
 }
@@ -6396,6 +6471,7 @@ static void SwitchMainThread( void* Arg )
 	SwitchLog( "[SWITCH THREAD] Entered 16MB Game Thread!\n" );
 #if defined(__SWITCH__)
 	SwitchApplyPerformanceProfile();
+	SwitchInitSaveData();
 #endif
 	Args->Result = RealMain( Args->ArgC, Args->ArgV );
 #if defined(__SWITCH__)
@@ -6518,6 +6594,10 @@ int main( int ArgC, char* ArgV[] )
 			Root += "/";
 
 		std::string CandidatePaths[] = {
+			"save:/User/Save/Slot0/Save0.usa",
+			"save:/User/Save/Save0.usa",
+			"save:/Save/Slot0/Save0.usa",
+			"save:/Save/Save0.usa",
 			Root + "User/Save/Slot0/Save0.usa",
 			Root + "User/Save/Save0.usa",
 			"sdmc:/switch/hp2/User/Save/Slot0/Save0.usa",

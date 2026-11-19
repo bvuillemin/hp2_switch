@@ -85,6 +85,97 @@ Use **64-bit Raspberry Pi OS with the desktop**. The game is not packaged as a P
 
 The first launch can take a while while the Pi builds the game. A 32-bit Raspberry Pi OS installation is not supported.
 
+## Nintendo Switch
+
+A native Nintendo Switch port of **Harry Potter and the Chamber of Secrets (PC, 2002)** running on modern OpenGL / EGL and Nintendo Horizon OS (`libnx`).
+
+The port supports two completely independent execution formats:
+- **Standalone NSP (Recommended)**: Installed directly to the Nintendo Switch HOME Menu. Assets are self-contained in internal RomFS (zero SD card clutter), saves are managed natively via Switch user account partitions (`save:/`), and the game runs in full Application mode with maximum OS memory priority.
+- **Homebrew NRO**: Runs via the Homebrew Launcher (`sdmc:/switch/hp2/HarryPotter2.nro`) with external assets and saves on the SD card (`sdmc:/switch/hp2/User/Save`).
+
+---
+
+### Features & Performance
+
+- **Silky 60 FPS Presentation**: Native 1280x720 rendering in handheld mode and 1920x1080 in docked mode.
+- **Integrated Hardware Tuning**: Automatically activates Horizon CPU boost (1224 MHz) and GPU boost (384 MHz) on startup for instant map loading (< 5s) and zero frame stutters, restoring clocks to stock on clean exit.
+- **Save System & Quick Load**:
+  - Automatically loads your latest save (`Slot0/Save0.usa`) on startup if one exists; otherwise starts a fresh game.
+  - **Quick Load Combo**: Press **L + R + Plus + Minus** at any time during gameplay to immediately reload your latest save without needing to go to the main menu.
+  - **Dual Save Storage**: Automatically detects environment—uses internal NAND user account storage (`save:/`) in NSP mode, and SD card (`sdmc:/switch/hp2/User/Save`) in NRO mode.
+- **Full Controller Integration**: Native Joy-Con and Pro Controller mapping with analog sticks, face buttons, triggers, and jump/spell actions.
+
+---
+
+### Installation & Playing
+
+#### Method A: Standalone NSP (Recommended)
+1. Transfer `Harry Potter and the Chamber of Secrets [0100485032000000][v0].nsp` to your Switch using **DBI** (via MTP Responder / Title install), **Tinfoil**, or **Goldleaf**.
+2. Launch the game directly from your **Switch HOME Menu**.
+3. Select your user profile when prompted.
+4. **Benefits**:
+   - Zero SD clutter: Game data resides safely inside RomFS.
+   - Saves are managed in the system NAND save partition (`save:/`) with full Atmosphere and DBI backup support.
+   - Full 32 MB save allocation per profile.
+
+#### Method B: Homebrew NRO
+1. Copy `HarryPotter2.nro` to your Nintendo Switch SD card:
+   ```
+   sdmc:/switch/hp2/HarryPotter2.nro
+   ```
+2. Copy your original PC game folders into `sdmc:/switch/hp2/`:
+   ```
+   sdmc:/
+   └── switch/
+       └── hp2/
+           ├── HarryPotter2.nro
+           ├── Maps/
+           ├── Music/
+           ├── Sounds/
+           ├── system/ (or System/)
+           └── Textures/
+   ```
+3. Launch `HarryPotter2` from the Homebrew Launcher (preferably in Title Override mode: hold `R` while launching any installed game from the HOME menu).
+
+---
+
+### How to Build Your Own Standalone NSP
+
+You can easily package your legally owned PC copy into a standalone installable NSP.
+
+#### Prerequisites
+1. **Python 3** installed on your computer.
+2. **Nintendo Switch Keys**: A dumped `prod.keys` file from your console (e.g. using Lockpick_RCM).
+3. **hacbrewpack**: Download `hacbrewpack` (v3.0+):
+   - Windows: Place `hacbrewpack.exe` in your `PATH` or in `tools/hacbrewpack.exe`.
+   - Linux: Build and install via `make && sudo make install`.
+4. **Compiled Switch Binary**:
+   - Run `./build_switch.sh` (using Docker or local devkitA64) to produce `out/switch-arm64/hp2_game.elf` and `out/switch-arm64/main`.
+
+#### Packaging Command
+Run the NSP builder script:
+
+```bash
+python3 scripts/build_nsp.py --game-dir "/path/to/pc/game/files" --keys "/path/to/prod.keys"
+```
+
+**Options**:
+- `--game-dir`: Path to the PC installation containing `system/`, `Maps/`, `Textures/`, `Sounds/`, etc.
+- `--keys`: Path to your dumped `prod.keys`.
+- `--hacbrewpack`: (Optional) Explicit path to `hacbrewpack` executable if not in PATH.
+- `--out-dir`: (Optional) Target output directory (defaults to `dist/`).
+- `--titleid`: (Optional) Title ID override (defaults to `0100485032000000`).
+
+The builder will stage the ExeFS (`main`, `main.npdm`), Control (`control.nacp`, 256x256 title icon), and RomFS assets (using zero-copy directory junctions on Windows or symlinks on Linux), compile the NCAs, and produce the finalized package:
+```
+dist/Harry Potter and the Chamber of Secrets [0100485032000000][v0].nsp
+```
+
+Alternatively, on Linux/macOS/WSL with Docker, you can run the all-in-one bash script:
+```bash
+./build_switch_nsp.sh --game-dir "/path/to/pc/game/files" --keys "/path/to/prod.keys"
+```
+
 ## Browser mode: play on a phone or tablet
 
 Browser mode runs on a computer that hosts the game and sends a secure web link to your phone or tablet. **Android devices with a current Chrome or Firefox browser are the supported mobile option. iPhone and iPad browsers currently cannot run this WebAssembly build.** Check [browser support for WebAssembly Memory64](https://caniuse.com/wf-wasm-memory64) before trying another device.
