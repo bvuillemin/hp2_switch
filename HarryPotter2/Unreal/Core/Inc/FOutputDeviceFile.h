@@ -14,7 +14,11 @@ public:
 	FOutputDeviceFile()
 	: LogAr( NULL )
 	, Opened( 0 )
+#if defined(__SWITCH__)
+	, Dead( 1 )
+#else
 	, Dead( 0 )
+#endif
 	{
 		Filename[0]=0;
 	}

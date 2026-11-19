@@ -1620,6 +1620,35 @@ ULevel* UGameEngine::LoadMap( const FURL& URL, UPendingLevel* Pending, const TMa
 	debugf( TEXT("Load time %s: %f seconds total, %f app"), 
 		*URL.Map, appSeconds()-LoadTime[0], appProcessSeconds()-LoadTime[1] );
 
+#if defined(__SWITCH__)
+	// Precache spell sounds and dialog incantations to eliminate spellcast hitching
+	static const TCHAR* SpellSounds[] = {
+		TEXT("AllDialog.PC_Hry_SpellCast_01a"), TEXT("AllDialog.PC_Hry_SpellCast_01b"), TEXT("AllDialog.PC_Hry_SpellCast_01c"),
+		TEXT("AllDialog.PC_Hry_SpellCast_02a"), TEXT("AllDialog.PC_Hry_SpellCast_02b"), TEXT("AllDialog.PC_Hry_SpellCast_02c"),
+		TEXT("AllDialog.PC_Hry_SpellCast_03a"), TEXT("AllDialog.PC_Hry_SpellCast_03b"), TEXT("AllDialog.PC_Hry_SpellCast_03c"),
+		TEXT("AllDialog.PC_Hry_SpellCast_04a"), TEXT("AllDialog.PC_Hry_SpellCast_04b"), TEXT("AllDialog.PC_Hry_SpellCast_04c"),
+		TEXT("AllDialog.PC_Hry_SpellCast_05a"), TEXT("AllDialog.PC_Hry_SpellCast_05b"), TEXT("AllDialog.PC_Hry_SpellCast_05c"),
+		TEXT("AllDialog.PC_Hry_SpellCast_06a"), TEXT("AllDialog.PC_Hry_SpellCast_06b"), TEXT("AllDialog.PC_Hry_SpellCast_06c"),
+		TEXT("AllDialog.PC_Hry_SpellCast_07a"), TEXT("AllDialog.PC_Hry_SpellCast_07b"), TEXT("AllDialog.PC_Hry_SpellCast_07c"),
+		TEXT("AllDialog.PC_Hry_SpellCast_08a"), TEXT("AllDialog.PC_Hry_SpellCast_08b"), TEXT("AllDialog.PC_Hry_SpellCast_08c"),
+		TEXT("AllDialog.PC_Hry_SpellCast_09a"), TEXT("AllDialog.PC_Hry_SpellCast_09b"), TEXT("AllDialog.PC_Hry_SpellCast_09c"),
+		TEXT("HPSounds.Magic_sfx.cast_Alohomora"),
+		TEXT("HPSounds.Magic_sfx.cast_Flipendo"),
+		TEXT("HPSounds.Magic_sfx.cast_Lumos"),
+		TEXT("HPSounds.Magic_sfx.cast_Skurge"),
+		TEXT("HPSounds.Magic_sfx.cast_Diffindo"),
+		TEXT("HPSounds.Magic_sfx.cast_Rictusempra"),
+		TEXT("HPSounds.Magic_sfx.cast_Spongify"),
+		TEXT("HPSounds.Magic_sfx.cast_Mimblewimble"),
+		TEXT("HPSounds.Magic_sfx.cast_Expelliarmus"),
+		TEXT("HPSounds.magic_sfx.spell_hit")
+	};
+	for( INT s=0; s<ARRAY_COUNT(SpellSounds); s++ )
+	{
+		UObject::StaticLoadObject( USound::StaticClass(), NULL, SpellSounds[s], NULL, LOAD_NoWarn | LOAD_Quiet, NULL );
+	}
+#endif
+
 	// Successfully started local level.
 	return GLevel;
 	unguard;

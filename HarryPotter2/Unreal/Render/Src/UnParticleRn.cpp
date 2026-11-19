@@ -1118,16 +1118,19 @@ void URender::DrawParticleSystem( FSceneNode* Frame, FDynamicSprite* Sprite )
 		{
 			PolyStripParticles System(Frame, Sprite, this);
 			System.Render();
+			break;
 		}
 		case PPRIM_Shard:
 		{
 			ShardParticles System(Frame, Sprite, this);
 			System.Render();
+			break;
 		}
 		case PPRIM_Liquid:
 		{
 			LiquidParticles System(Frame, Sprite, this);
 			System.Render();
+			break;
 		}
 		case PPRIM_Billboard:
 			if ( !ParticleFX->bShellOnly )
@@ -1146,6 +1149,7 @@ void URender::DrawParticleSystem( FSceneNode* Frame, FDynamicSprite* Sprite )
 		{
 			TriTubeParticles System(Frame, Sprite, this);
 			System.Render();
+			break;
 		}
 		default:
 			// we have a problem

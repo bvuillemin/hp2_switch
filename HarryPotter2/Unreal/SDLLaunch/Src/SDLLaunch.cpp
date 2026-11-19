@@ -6307,7 +6307,10 @@ static int HP2BootAfterLauncher(
 		}
 
 #if defined(__SWITCH__)
-		GLogHook = &StdoutEcho;
+		if( ParseParam( appCmdLine(), TEXT("LOG") ) )
+			GLogHook = &StdoutEcho;
+		else
+			GLogHook = NULL;
 #else
 		if( ParseParam( appCmdLine(), TEXT("LOG") ) )
 			GLogHook = &StdoutEcho;

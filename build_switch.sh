@@ -14,6 +14,8 @@ export DEVKITPRO=/opt/devkitpro
 export DEVKITA64=/opt/devkitpro/devkitA64
 export PATH=$DEVKITA64/bin:$DEVKITPRO/tools/bin:$PATH
 
+git config --global --add safe.directory "*" 2>/dev/null || true
+
 echo "=== GCC ==="
 aarch64-none-elf-g++ --version | head -n 1
 

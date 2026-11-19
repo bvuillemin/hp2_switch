@@ -700,6 +700,52 @@ void UXOpenGLRenderDevice::InitShaders()
 	LoadShaderCache();
 	RecompileShaders();
 
+#if defined(__SWITCH__)
+	if (Shaders[Gouraud_Prog])
+	{
+		ShaderCompilationOptions BaseOpt;
+		BaseOpt.SetOptionsForRendererConfig(this);
+
+		const DWORD GouraudVariants[] = {
+			0,
+			ShaderCompilationOptions::OPT_IsTranslucent,
+			ShaderCompilationOptions::OPT_IsTranslucent | ShaderCompilationOptions::OPT_IsUnlit,
+			ShaderCompilationOptions::OPT_IsAlphaBlended,
+			ShaderCompilationOptions::OPT_IsAlphaBlended | ShaderCompilationOptions::OPT_IsUnlit,
+			ShaderCompilationOptions::OPT_IsModulated,
+			ShaderCompilationOptions::OPT_IsMasked,
+			ShaderCompilationOptions::OPT_IsUnlit,
+		};
+		for (DWORD Var : GouraudVariants)
+		{
+			ShaderCompilationOptions Opt = BaseOpt;
+			Opt.SetOption(Var);
+			Shaders[Gouraud_Prog]->SelectSpecialization(Opt);
+		}
+	}
+	if (Shaders[Complex_Prog])
+	{
+		ShaderCompilationOptions BaseOpt;
+		BaseOpt.SetOptionsForRendererConfig(this);
+
+		const DWORD ComplexVariants[] = {
+			0,
+			ShaderCompilationOptions::OPT_HasLightMap,
+			ShaderCompilationOptions::OPT_HasLightMap | ShaderCompilationOptions::OPT_HasDetailTexture,
+			ShaderCompilationOptions::OPT_HasLightMap | ShaderCompilationOptions::OPT_IsMasked,
+			ShaderCompilationOptions::OPT_HasLightMap | ShaderCompilationOptions::OPT_IsAlphaBlended,
+			ShaderCompilationOptions::OPT_HasLightMap | ShaderCompilationOptions::OPT_IsTranslucent,
+			ShaderCompilationOptions::OPT_HasLightMap | ShaderCompilationOptions::OPT_IsModulated,
+		};
+		for (DWORD Var : ComplexVariants)
+		{
+			ShaderCompilationOptions Opt = BaseOpt;
+			Opt.SetOption(Var);
+			Shaders[Complex_Prog]->SelectSpecialization(Opt);
+		}
+	}
+#endif
+
 	unguard;
 }
 

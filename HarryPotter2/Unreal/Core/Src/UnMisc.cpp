@@ -2031,7 +2031,9 @@ CORE_API void appInit( const TCHAR* InPackage, const TCHAR* InCmdLine, FMalloc* 
 	bool bDefaultIniChanged = false;
 	if(   RequireConfig
 	   && (   GFileManager->FileSize(GIni) < 0
+#if !defined(__SWITCH__)
 	       || GFileManager->GetGlobalTime(TEXT("Default.ini"))  >  GFileManager->GetGlobalTime(GIni) //ft
+#endif
 	      )
 	  )
 	{
@@ -2063,8 +2065,10 @@ CORE_API void appInit( const TCHAR* InPackage, const TCHAR* InCmdLine, FMalloc* 
 		appSprintf( GUserIni, TEXT("%sUser.ini"), appUserDir() );
 	if(   RequireConfig
 	   && (   GFileManager->FileSize(GUserIni) < 0
+#if !defined(__SWITCH__)
 	       || GFileManager->GetGlobalTime(TEXT("DefUser.ini"))  >  GFileManager->GetGlobalTime(GUserIni) //ft
 	       || bDefaultIniChanged
+#endif
 	      )
 	  )
 	{
