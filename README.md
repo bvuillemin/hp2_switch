@@ -141,40 +141,78 @@ The port supports two completely independent execution formats:
 
 ### How to Build Your Own Standalone NSP
 
-You can easily package your legally owned PC copy into a standalone installable NSP.
+You can build and package your legally owned PC copy into a standalone, installable NSP directly for the Nintendo Switch.
 
-#### Prerequisites
-1. **Python 3** installed on your computer.
-2. **Nintendo Switch Keys**: A dumped `prod.keys` file from your console (e.g. using Lockpick_RCM).
-3. **hacbrewpack**: Download `hacbrewpack` (v3.0+):
-   - Windows: Place `hacbrewpack.exe` in your `PATH` or in `tools/hacbrewpack.exe`.
-   - Linux: Build and install via `make && sudo make install`.
-4. **Compiled Switch Binary**:
-   - Run `./build_switch.sh` (using Docker or local devkitA64) to produce `out/switch-arm64/hp2_game.elf` and `out/switch-arm64/main`.
+#### Step 1: Prerequisites & Setup
+1. **Python 3.8+** installed on your system.
+2. **Original PC Game Data**: A folder containing your installed PC copy with `Maps/`, `Music/`, `Sounds/`, `system/`, and `Textures/`.
+3. **Switch Keyset (`prod.keys`)**: Dumped from your Switch console (e.g. using Lockpick_RCM or Picofly).
+4. **hacbrewpack** (v3.05+):
+   - **Download**: Grab the latest binary from [hacBrewPack Releases](https://github.com/The-4n/hacBrewPack/releases).
+   - **Windows**: Place `hacbrewpack.exe` in `tools/hacbrewpack.exe` inside this repo, or add it to your `PATH`.
+   - **Linux / macOS**: Compile or install to your `PATH` (`make && sudo make install`).
 
-#### Packaging Command
-Run the NSP builder script:
+---
+
+#### Step 2: Compile the Nintendo Switch Binary
+The project uses the devkitA64 toolchain. The easiest way to build without configuring a local devkitPro installation is with **Docker** or **WSL**:
+
+- **Linux / macOS / WSL**:
+  ```bash
+  ./build_switch.sh
+  ```
+- **Windows (PowerShell with Docker Desktop)**:
+  ```powershell
+  docker run --rm -v "${PWD}:/work" -w /work devkitpro/devkita64 bash build_switch.sh
+  ```
+- **Local devkitPro (if installed)**:
+  ```bash
+  cmake --preset switch-arm64
+  cmake --build --preset switch-arm64 --target HarryPotter2
+  elf2nso out/switch-arm64/hp2_game.elf out/switch-arm64/main
+  ```
+
+This generates:
+- `out/switch-arm64/main`: The Switch executable (NSO) for standalone NSP packaging.
+- `out/switch-arm64/HarryPotter2.nro`: The homebrew executable.
+
+---
+
+#### Step 3: Package the NSP
+Run the cross-platform Python builder:
 
 ```bash
-python3 scripts/build_nsp.py --game-dir "/path/to/pc/game/files" --keys "/path/to/prod.keys"
+python scripts/build_nsp.py --game-dir "/path/to/pc/game/files" --keys "/path/to/prod.keys"
 ```
 
-**Options**:
-- `--game-dir`: Path to the PC installation containing `system/`, `Maps/`, `Textures/`, `Sounds/`, etc.
+**Parameters & Options**:
+- `--game-dir`: Path to the PC game directory containing `system/`, `Maps/`, `Textures/`, `Sounds/`, etc.
 - `--keys`: Path to your dumped `prod.keys`.
-- `--hacbrewpack`: (Optional) Explicit path to `hacbrewpack` executable if not in PATH.
-- `--out-dir`: (Optional) Target output directory (defaults to `dist/`).
-- `--titleid`: (Optional) Title ID override (defaults to `0100485032000000`).
+- `--hacbrewpack`: (Optional) Explicit path to `hacbrewpack` executable if not in `tools/` or `PATH`.
+- `--out-dir`: (Optional) Output directory for the `.nsp` file (defaults to `dist/`).
+- `--titleid`: (Optional) Custom Title ID (defaults to `0100485032000000`).
 
-The builder will stage the ExeFS (`main`, `main.npdm`), Control (`control.nacp`, 256x256 title icon), and RomFS assets (using zero-copy directory junctions on Windows or symlinks on Linux), compile the NCAs, and produce the finalized package:
-```
-dist/Harry Potter and the Chamber of Secrets [0100485032000000][v0].nsp
-```
+The builder script automatically:
+1. Stages the ExeFS (`main`, `main.npdm`) with the required Application permissions and 16 MB stack allocation.
+2. Stages RomFS assets using **zero-copy directory junctions** on Windows (or symlinks on Linux) to prevent duplicating large asset files on disk.
+3. Generates the Control NCA (with title metadata and 256x256 HOME menu icon).
+4. Invokes `hacbrewpack` to create the final signed NSP in `dist/`:
+   ```
+   dist/Harry Potter and the Chamber of Secrets [0100485032000000][v0].nsp
+   ```
 
-Alternatively, on Linux/macOS/WSL with Docker, you can run the all-in-one bash script:
+*(Alternative)*: On Linux or WSL with Docker, you can run the all-in-one script to build and package in a single command:
 ```bash
 ./build_switch_nsp.sh --game-dir "/path/to/pc/game/files" --keys "/path/to/prod.keys"
 ```
+
+---
+
+#### Step 4: Install to Nintendo Switch
+1. Connect your Switch to your PC via USB and launch **DBI** on the console.
+2. Select **Run MTP Responder**.
+3. Open the **MicroSD install** or **NAND install** drive on your PC and drag & drop the generated `.nsp` file.
+4. Launch the game from your Switch HOME menu!
 
 ## Browser mode: play on a phone or tablet
 
