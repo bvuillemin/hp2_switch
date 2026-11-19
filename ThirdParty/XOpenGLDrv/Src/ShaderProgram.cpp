@@ -721,6 +721,33 @@ void UXOpenGLRenderDevice::InitShaders()
 			ShaderCompilationOptions Opt = BaseOpt;
 			Opt.SetOption(Var);
 			Shaders[Gouraud_Prog]->SelectSpecialization(Opt);
+
+			ShaderCompilationOptions FogOpt = BaseOpt;
+			FogOpt.SetOption(Var | ShaderCompilationOptions::OPT_IsRenderFog);
+			Shaders[Gouraud_Prog]->SelectSpecialization(FogOpt);
+		}
+	}
+	if (Shaders[Tile_Prog])
+	{
+		ShaderCompilationOptions BaseOpt;
+		BaseOpt.SetOptionsForRendererConfig(this);
+
+		const DWORD TileVariants[] = {
+			0,
+			ShaderCompilationOptions::OPT_IsMasked,
+			ShaderCompilationOptions::OPT_IsAlphaBlended,
+			ShaderCompilationOptions::OPT_IsTranslucent,
+			ShaderCompilationOptions::OPT_IsModulated,
+		};
+		for (DWORD Var : TileVariants)
+		{
+			ShaderCompilationOptions Opt = BaseOpt;
+			Opt.SetOption(Var);
+			Shaders[Tile_Prog]->SelectSpecialization(Opt);
+
+			ShaderCompilationOptions FogOpt = BaseOpt;
+			FogOpt.SetOption(Var | ShaderCompilationOptions::OPT_IsRenderFog);
+			Shaders[Tile_Prog]->SelectSpecialization(FogOpt);
 		}
 	}
 	if (Shaders[Complex_Prog])
@@ -742,6 +769,10 @@ void UXOpenGLRenderDevice::InitShaders()
 			ShaderCompilationOptions Opt = BaseOpt;
 			Opt.SetOption(Var);
 			Shaders[Complex_Prog]->SelectSpecialization(Opt);
+
+			ShaderCompilationOptions FogOpt = BaseOpt;
+			FogOpt.SetOption(Var | ShaderCompilationOptions::OPT_IsRenderFog);
+			Shaders[Complex_Prog]->SelectSpecialization(FogOpt);
 		}
 	}
 #endif

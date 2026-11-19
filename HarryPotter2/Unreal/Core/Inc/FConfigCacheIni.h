@@ -146,6 +146,9 @@ public:
 			else
 				Empty();
 		}
+#if defined(__SWITCH__)
+		SwitchCommitSaveData();
+#endif
 		unguard;
 	}
 	void Detach( const TCHAR* Filename )

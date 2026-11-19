@@ -1346,6 +1346,49 @@ static UBOOL TouchTo( AActor* Actor, AActor* Other )
 	{
 		// Make Actor touch TouchActor.
 		Actor->Touching[Available] = Other;
+#if defined(__SWITCH__)
+		if( Actor && Other )
+		{
+			AActor* SavePointActor = NULL;
+			APlayerPawn* PlayerPawnActor = NULL;
+			if( Actor->GetClass() && appStricmp(Actor->GetClass()->GetName(), TEXT("SavePoint")) == 0 )
+			{
+				SavePointActor = Actor;
+				PlayerPawnActor = Cast<APlayerPawn>( Other );
+			}
+			else if( Other->GetClass() && appStricmp(Other->GetClass()->GetName(), TEXT("SavePoint")) == 0 )
+			{
+				SavePointActor = Other;
+				PlayerPawnActor = Cast<APlayerPawn>( Actor );
+			}
+			if( SavePointActor && PlayerPawnActor )
+			{
+				UProperty* Prop = FindField<UProperty>(SavePointActor->GetClass(), TEXT("playerHarry"));
+				if( Prop )
+				{
+					UObject** ObjPtr = (UObject**)((BYTE*)SavePointActor + Prop->Offset);
+					*ObjPtr = PlayerPawnActor;
+				}
+				UBoolProperty* BoolProp = FindField<UBoolProperty>(SavePointActor->GetClass(), TEXT("bActive"));
+				if( BoolProp )
+				{
+					*(BITFIELD*)((BYTE*)SavePointActor + BoolProp->Offset) |= BoolProp->BitMask;
+				}
+				if( Actor->GetLevel() && Actor->GetLevel()->GetLevelInfo() )
+				{
+					Actor->GetLevel()->GetLevelInfo()->PlayerHarryActor = PlayerPawnActor;
+				}
+				SwitchLog( "[SWITCH SAVEPOINT] SavePoint '%ls' touched by player '%ls'! Activating and queueing save...\n",
+					SavePointActor->GetName(), PlayerPawnActor->GetName() );
+				UFunction* OnSaveFn = SavePointActor->FindFunction( FName(TEXT("OnSaveGame")) );
+				if( OnSaveFn )
+				{
+					SavePointActor->ProcessEvent( OnSaveFn, NULL );
+				}
+				PlayerPawnActor->bQueuedToSaveGame = 1;
+			}
+		}
+#endif
 		Actor->eventTouch( Other );
 
 		// See if first actor did something that caused an UnTouch.

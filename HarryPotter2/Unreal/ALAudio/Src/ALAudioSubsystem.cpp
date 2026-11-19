@@ -795,6 +795,11 @@ INT UALAudioSubsystem::PlaySound( AActor* Actor, INT Id, USound* Sound, FVector 
 	//
 	Sound->WorkingFlags = Sound->CoreFlags | Flags;
 	const UBOOL IsTalk = (Id & 14) == (SLOT_Talk * 2);
+	if( IsTalk )
+	{
+		Flags |= SF_No3D;
+		Sound->WorkingFlags |= SF_No3D;
+	}
 
 	if( !Viewport || !Sound)
 		return -1;
@@ -965,16 +970,16 @@ INT UALAudioSubsystem::PlaySound( AActor* Actor, INT Id, USound* Sound, FVector 
 	else
 		alSourcei( sid, AL_LOOPING, (Flags & SF_Looping) ? AL_TRUE : AL_FALSE );
 
-	FVector Location =  Sources(Index).Location * DISTANCE_FACTOR;
+	FVector Location = ((Flags & SF_No3D) || IsTalk) ? FVector(0,0,0) : (Sources(Index).Location * DISTANCE_FACTOR);
 	alSourcefv( sid, AL_POSITION, (ALfloat*) &Location); 
 
 	FVector Velocity = FVector(0,0,0);
 	alSourcefv( sid, AL_VELOCITY, (ALfloat *) &Velocity );
 
 	//!!WARNING: DS3D doesn't support per source rolloff factor!
-	alSourcef( sid, AL_ROLLOFF_FACTOR, RollOff );
+	alSourcef( sid, AL_ROLLOFF_FACTOR, ((Flags & SF_No3D) || IsTalk) ? 0.0f : RollOff );
 
-	if( Flags & SF_No3D )
+	if( (Flags & SF_No3D) || IsTalk )
 		alSourcei( sid, AL_SOURCE_RELATIVE, AL_TRUE );
 	else
 		alSourcei( sid, AL_SOURCE_RELATIVE, AL_FALSE );
@@ -1712,7 +1717,7 @@ void UALAudioSubsystem::Update( FSceneNode* SceneNode )
 
 				alSourcef ( Sources(i).Source, AL_GAIN, Volume );
 
-				if( !(Sources(i).Flags & SF_No3D) )
+				if( !(Sources(i).Flags & SF_No3D) && !((Sources(i).Id & 14) == (SLOT_Talk * 2)) )
 				{
 					// Sound occclusion.
 					FLOAT Radius = Sources(i).Radius;
@@ -1759,7 +1764,7 @@ void UALAudioSubsystem::Update( FSceneNode* SceneNode )
 					Sources(i).Flags
 				);
 
-				if( !(Sources(i).Flags & SF_No3D) )
+				if( !(Sources(i).Flags & SF_No3D) && !((Sources(i).Id & 14) == (SLOT_Talk * 2)) )
 				{
 					FVector Location = Sources(i).Location * DISTANCE_FACTOR;
 					Velocity *= DISTANCE_FACTOR;

@@ -599,6 +599,13 @@ UBOOL UGameEngine::Exec( const TCHAR* Cmd, FOutputDevice& Ar )
 #if defined(__SWITCH__)
 			SwitchLog( "[SWITCH LOAD] Executing LOADGAME %i (SaveSlotPath: '%ls')...\n", Slot, *GSys->SaveSlotPath );
 			UObject::ForceResetPackageLoaders( TEXT("Save0.usa") );
+			UObject::ForceResetPackageLoaders( TEXT("Save0") );
+			UPackage* ExistingSavePkg = FindObject<UPackage>( ANY_PACKAGE, TEXT("Save0") );
+			if( ExistingSavePkg )
+			{
+				SwitchLog( "[SWITCH LOAD] Existing package 'Save0' in memory; renaming to allow fresh load from disk...\n" );
+				ExistingSavePkg->Rename( NULL );
+			}
 #endif
 			TCHAR LoadURL[32];
 			if( appFormatLoadGameURL(Slot,LoadURL,ARRAY_COUNT(LoadURL)) )
@@ -859,6 +866,13 @@ UBOOL UGameEngine::Browse( FURL URL, const TMap<FString,FString>* TravelInfo, FS
 #if defined(__SWITCH__)
 		SwitchLog( "[SWITCH LOAD] Browse: Loading savegame file '%ls' (size=%i)...\n", *Temp, GFileManager->FileSize(*Temp) );
 		UObject::ForceResetPackageLoaders( TEXT("Save0.usa") );
+		UObject::ForceResetPackageLoaders( TEXT("Save0") );
+		UPackage* ExistingSavePkg = FindObject<UPackage>( ANY_PACKAGE, TEXT("Save0") );
+		if( ExistingSavePkg )
+		{
+			SwitchLog( "[SWITCH LOAD] Existing package 'Save0' in memory; renaming to allow fresh load from disk...\n" );
+			ExistingSavePkg->Rename( NULL );
+		}
 #endif
 		FURL SaveURL(*Temp);
 		SaveURL.AddOption(TEXT("load"));
@@ -2108,13 +2122,36 @@ void UGameEngine::Tick( FLOAT DeltaSeconds )
 	}
 	unguard;
 
+	// HP2 specific - Maintain Level.playerHarryActor so scripts never see None
+	if( GLevel && GLevel->GetLevelInfo() && Client && Client->Viewports.Num() && Client->Viewports(0)->Actor )
+	{
+		GLevel->GetLevelInfo()->PlayerHarryActor = Client->Viewports(0)->Actor;
+	}
+
 	// HP2 specific - Handle player saving
 	guard(PlayerSaving);
-	APlayerPawn* Player = Client->Viewports(0)->Actor;
-	if( Client && Client->Viewports.Num() && Player && Player->bQueuedToSaveGame )
+	APlayerPawn* PlayerToSave = NULL;
+	if( Client && Client->Viewports.Num() && Client->Viewports(0)->Actor && Client->Viewports(0)->Actor->bQueuedToSaveGame )
+	{
+		PlayerToSave = Client->Viewports(0)->Actor;
+	}
+	else if( GLevel )
+	{
+		for( INT i=0; i<GLevel->Actors.Num(); i++ )
+		{
+			APlayerPawn* PP = Cast<APlayerPawn>( GLevel->Actors(i) );
+			if( PP && PP->bQueuedToSaveGame )
+			{
+				PlayerToSave = PP;
+				break;
+			}
+		}
+	}
+
+	if( PlayerToSave )
 	{
 #if defined(__SWITCH__)
-		SwitchLog( "[SWITCH TICK] Player->bQueuedToSaveGame detected! Triggering SaveGame(0)...\n" );
+		SwitchLog( "[SWITCH TICK] Player '%ls' bQueuedToSaveGame detected! Triggering SaveGame(0)...\n", PlayerToSave->GetName() );
 #endif
 		// We are queued to save the game...
 	
@@ -2128,7 +2165,9 @@ void UGameEngine::Tick( FLOAT DeltaSeconds )
 		debugf( NAME_Log, TEXT("Saving game...(before call) Filename: %s"), Filename );
 		
 		// Make sure we set this to false BEFORE we save the game.
-		Player->bQueuedToSaveGame = false;
+		PlayerToSave->bQueuedToSaveGame = false;
+		if( Client && Client->Viewports.Num() && Client->Viewports(0)->Actor )
+			Client->Viewports(0)->Actor->bQueuedToSaveGame = false;
 		
 		// *** SAVE THE GAME
 		SaveGame( 0 );
@@ -2394,6 +2433,8 @@ void UGameEngine::SaveGame( INT Position )
 	// Now that we are done saving our game, save all of our pa files from cache into our SaveGamePath
 	SavePersistentActorCache();
 #if defined(__SWITCH__)
+	if( GConfig )
+		GConfig->Flush( 0 );
 	SwitchCommitSaveData();
 	SwitchLog( "[SWITCH SAVE] SaveGame completed and committed.\n" );
 #endif

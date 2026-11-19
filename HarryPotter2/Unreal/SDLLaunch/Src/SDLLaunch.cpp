@@ -111,11 +111,6 @@ extern "C" void SwitchLog( const char* Fmt, ... )
 		GSwitchEarlyLogLen += Len;
 		GSwitchEarlyLogBuffer[GSwitchEarlyLogLen] = 0;
 	}
-
-	if( GSwitchHasInternalSave )
-	{
-		fsdevCommitDevice( "save" );
-	}
 #endif
 }
 
@@ -142,6 +137,8 @@ extern "C" void SwitchApplyPerformanceProfile( void )
 		mkdir( "sdmc:/switch/hp2/cache", 0777 );
 		mkdir( "sdmc:/switch/hp2/cache/mesa", 0777 );
 	}
+	setenv( "MESA_SHADER_CACHE_DIR", CacheDir, 1 );
+	setenv( "MESA_SHADER_CACHE_DISABLE", "0", 1 );
 	setenv( "MESA_GLSL_CACHE_DIR", CacheDir, 1 );
 	setenv( "MESA_GLSL_CACHE_MAX_SIZE", "128MB", 1 );
 	setenv( "XDG_CACHE_HOME", XdgCache, 1 );
@@ -391,6 +388,8 @@ extern "C" void userAppInit( void )
 extern "C" void userAppExit( void )
 {
 	SwitchLog( "[SWITCH STAGE X] userAppExit called.\n" );
+	if( GConfig )
+		GConfig->Flush( 0 );
 	SwitchCommitSaveData();
 	if( GSwitchSaveLogFile )     { fclose( GSwitchSaveLogFile );     GSwitchSaveLogFile = NULL; }
 	if( GSwitchSaveUserLogFile ) { fclose( GSwitchSaveUserLogFile ); GSwitchSaveUserLogFile = NULL; }
@@ -5778,7 +5777,12 @@ void MainLoop( UEngine* Engine, INT TestTicks, FLOAT FixedDeltaSeconds, Lifecycl
 	{
 #if defined(__SWITCH__)
 		if( !appletMainLoop() )
+		{
+			if( GConfig )
+				GConfig->Flush( 0 );
+			SwitchCommitSaveData();
 			break;
+		}
 #endif
 		MainLoopTick( State );
 		MainLoopFrameCap( State );
@@ -5788,10 +5792,17 @@ void MainLoop( UEngine* Engine, INT TestTicks, FLOAT FixedDeltaSeconds, Lifecycl
 
 void CleanUpOnExit( UEngine* Engine )
 {
+#if defined(__SWITCH__)
+	if( GConfig )
+		GConfig->Flush( 0 );
+	SwitchCommitSaveData();
+#endif
 	if( Engine )
 		Engine->Exit();
 	appPreExit();
 #if defined(__SWITCH__)
+	if( GConfig )
+		GConfig->Flush( 0 );
 	SwitchCommitSaveData();
 	if( GSwitchHasInternalSave )
 	{
