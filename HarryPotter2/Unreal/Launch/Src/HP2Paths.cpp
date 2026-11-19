@@ -113,7 +113,7 @@ char* CanonicalizeExistingDirectory(const char* Directory);
 #if defined(__SWITCH__)
 char* ResolveDataHomePrefix()
 {
-	const char* SwitchRoot = (envIsNso() && GSwitchHasInternalSave) ? "save:/" : "sdmc:/switch/hp2";
+	const char* SwitchRoot = envIsNso() ? "save:/" : "sdmc:/switch/hp2";
 	size_t Length = std::strlen(SwitchRoot);
 	char* Copy = static_cast<char*>(std::malloc(Length + 1));
 	if (Copy)
@@ -1875,7 +1875,7 @@ HP2PathsBootstrap BootstrapHP2Paths(int ArgC, char* const ArgV[])
 	if (envIsNso())
 	{
 		Result.RetailDataRoot = "romfs:/";
-		Result.SearchedRoot = "sdmc:/switch/hp2";
+		Result.SearchedRoot = "romfs:/";
 	}
 	else
 	{

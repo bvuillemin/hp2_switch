@@ -90,26 +90,6 @@ extern "C" void SwitchLog( const char* Fmt, ... )
 	va_end( DbgArgs );
 	svcOutputDebugString( DbgBuf, strlen(DbgBuf) );
 #endif
-	if( !GSwitchLogFile )
-	{
-		mkdir( "sdmc:/switch", 0777 );
-		mkdir( "sdmc:/switch/hp2", 0777 );
-		GSwitchLogFile = fopen( "sdmc:/switch/hp2/boot.log", "w" );
-		if( !GSwitchLogFile && GSwitchHasInternalSave )
-		{
-			GSwitchLogFile = fopen( "save:/boot.log", "w" );
-		}
-		if( GSwitchLogFile )
-			setvbuf( GSwitchLogFile, NULL, _IONBF, 0 );
-	}
-	if( GSwitchLogFile )
-	{
-		va_list Args;
-		va_start( Args, Fmt );
-		vfprintf( GSwitchLogFile, Fmt, Args );
-		va_end( Args );
-		fflush( GSwitchLogFile );
-	}
 }
 
 static bool GSwitchApmInited = false;
@@ -119,17 +99,21 @@ static ClkrstSession GSwitchClkCpu;
 extern "C" void SwitchApplyPerformanceProfile( void )
 {
 	// 1. Setup Mesa and system shader cache directories
-	const char* CacheDir = GSwitchHasInternalSave ? "save:/User/Cache/mesa" : "sdmc:/switch/hp2/cache/mesa";
-	const char* XdgCache = GSwitchHasInternalSave ? "save:/User/Cache" : "sdmc:/switch/hp2/cache";
-	mkdir( "sdmc:/switch", 0777 );
-	mkdir( "sdmc:/switch/hp2", 0777 );
-	mkdir( "sdmc:/switch/hp2/cache", 0777 );
-	mkdir( "sdmc:/switch/hp2/cache/mesa", 0777 );
-	if( GSwitchHasInternalSave )
+	const bool UseInternalSave = (envIsNso() || GSwitchHasInternalSave);
+	const char* CacheDir = UseInternalSave ? "save:/User/Cache/mesa" : "sdmc:/switch/hp2/cache/mesa";
+	const char* XdgCache = UseInternalSave ? "save:/User/Cache" : "sdmc:/switch/hp2/cache";
+	if( UseInternalSave )
 	{
 		mkdir( "save:/User", 0777 );
 		mkdir( "save:/User/Cache", 0777 );
 		mkdir( "save:/User/Cache/mesa", 0777 );
+	}
+	else
+	{
+		mkdir( "sdmc:/switch", 0777 );
+		mkdir( "sdmc:/switch/hp2", 0777 );
+		mkdir( "sdmc:/switch/hp2/cache", 0777 );
+		mkdir( "sdmc:/switch/hp2/cache/mesa", 0777 );
 	}
 	setenv( "MESA_GLSL_CACHE_DIR", CacheDir, 1 );
 	setenv( "MESA_GLSL_CACHE_MAX_SIZE", "128MB", 1 );
@@ -387,17 +371,29 @@ extern "C" void __libnx_exception_handler(ThreadExceptionDump *ctx)
 		(unsigned)ctx->pstate
 	);
 	svcOutputDebugString(Buf, strlen(Buf));
-	mkdir("sdmc:/switch", 0777);
-	mkdir("sdmc:/switch/hp2", 0777);
-	FILE* F = fopen("sdmc:/switch/hp2/crash.log", "w");
-	if (!F && GSwitchHasInternalSave)
-		F = fopen("save:/crash.log", "w");
-	if (F)
+	if (!envIsNso())
 	{
-		fputs(Buf, F);
-		for (int i = 0; i < 29; i++)
-			fprintf(F, "X[%02d]: 0x%016llx\n", i, (unsigned long long)ctx->cpu_gprs[i].x);
-		fclose(F);
+		mkdir("sdmc:/switch", 0777);
+		mkdir("sdmc:/switch/hp2", 0777);
+		FILE* F = fopen("sdmc:/switch/hp2/crash.log", "w");
+		if (F)
+		{
+			fputs(Buf, F);
+			for (int i = 0; i < 29; i++)
+				fprintf(F, "X[%02d]: 0x%016llx\n", i, (unsigned long long)ctx->cpu_gprs[i].x);
+			fclose(F);
+		}
+	}
+	else if (GSwitchHasInternalSave)
+	{
+		FILE* F = fopen("save:/crash.log", "w");
+		if (F)
+		{
+			fputs(Buf, F);
+			for (int i = 0; i < 29; i++)
+				fprintf(F, "X[%02d]: 0x%016llx\n", i, (unsigned long long)ctx->cpu_gprs[i].x);
+			fclose(F);
+		}
 	}
 	SwitchLog("%s", Buf);
 	for(int i = 0; i < 28; i += 2)
