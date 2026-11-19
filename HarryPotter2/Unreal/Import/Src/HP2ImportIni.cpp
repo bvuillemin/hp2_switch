@@ -141,7 +141,11 @@ void ValidateDefault(const Lines& lines, Profile profile) {
         {"Engine.Engine", "ViewportManager", "SDLDrv.SDLClient"},
         {"Engine.Engine", "AudioDevice", "ALAudio.ALAudioSubsystem"},
         {"Engine.Engine", "Language", retail ? "usa" : "int"},
+#if defined(__SWITCH__)
+        {"Engine.GameEngine", "FrameRateLimit", "60.000000"},
+#else
         {"Engine.GameEngine", "FrameRateLimit", "144.000000"},
+#endif
         {"SDLDrv.SDLClient", "NativeText", "True"}
     };
     for (const auto& [section, key, value] : expected) {
@@ -228,7 +232,11 @@ std::string BuildDefaultIni(const fs::path& templatePath, const fs::path& retail
         {"ViewportManager", "SDLDrv.SDLClient"}, {"Language", profile == Profile::Safe ? "int" : "usa"}
     };
     for (const auto& [key, value] : engine) Set(lines, "Engine.Engine", key, value);
+#if defined(__SWITCH__)
+    Set(lines, "Engine.GameEngine", "FrameRateLimit", "60.000000");
+#else
     Set(lines, "Engine.GameEngine", "FrameRateLimit", "144.000000");
+#endif
     Remove(lines, "Engine.GameEngine", "ServerActors", true);
     Set(lines, "Core.System", "SavePath", "../Save");
     Set(lines, "Core.System", "CachePath", "../Cache");
@@ -250,8 +258,14 @@ std::string BuildDefaultIni(const fs::path& templatePath, const fs::path& retail
     for (const auto& [key, value] : sdl) Set(lines, "SDLDrv.SDLClient", key, value);
     const std::vector<std::pair<std::string, std::string>> gl = {
         {"OpenGLVersion", "Core"}, {"UseBindlessTextures", "False"}, {"UsePersistentBuffers", "False"}, {"UseShaderDrawParameters", "False"},
-        {"UseBufferInvalidation", "False"}, {"UseShaderCache", "False"}, {"DetailTextures", "True"}, {"MacroTextures", "True"},
+        {"UseBufferInvalidation", "False"},
+#if defined(__SWITCH__)
+        {"UseShaderCache", "True"}, {"DetailTextures", "True"}, {"MacroTextures", "True"},
+        {"UseTrilinear", "True"}, {"UsePrecache", "True"}, {"UseVSync", "Off"}, {"UseAA", "False"}, {"NumAASamples", "0"}, {"MaxAnisotropy", "4.000000"}
+#else
+        {"UseShaderCache", "False"}, {"DetailTextures", "True"}, {"MacroTextures", "True"},
         {"UseTrilinear", "True"}, {"UsePrecache", "True"}, {"UseVSync", "Off"}, {"UseAA", "True"}, {"NumAASamples", "4"}, {"MaxAnisotropy", "16.000000"}
+#endif
     };
     for (const auto& [key, value] : gl) Set(lines, "XOpenGLDrv.XOpenGLRenderDevice", key, value);
     if (profile != Profile::Safe) {

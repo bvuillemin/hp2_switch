@@ -228,7 +228,11 @@ void UGameEngine::StaticConstructor()
 	// modern display's refresh rate unused, and one more frame costs far less
 	// than the engine stuttering below the display rate. A data root that pins
 	// its own value still wins, which is why the launcher writes 144 as well.
+#if defined(__SWITCH__)
+	FrameRateLimit = 60.f;
+#else
 	FrameRateLimit = 144.f;
+#endif
 
 	unguard;
 }
@@ -240,6 +244,11 @@ void UGameEngine::Init()
 {
 	guard(UGameEngine::Init);
 	check(sizeof(*this)==GetClass()->GetPropertiesSize());
+
+#if defined(__SWITCH__)
+	if( FrameRateLimit > 60.0f || FrameRateLimit <= 0.0f )
+		FrameRateLimit = 60.0f;
+#endif
 
 	// Call base.
 	UEngine::Init();

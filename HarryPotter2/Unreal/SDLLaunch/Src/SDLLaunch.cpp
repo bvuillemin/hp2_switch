@@ -73,6 +73,9 @@ FOutputDeviceStdout StdoutEcho;
 #if defined(__SWITCH__)
 #include <sys/stat.h>
 #include <stdarg.h>
+#include <stdlib.h>
+
+extern "C" int setenv(const char *name, const char *value, int overwrite);
 
 extern "C" FILE* GSwitchLogFile = NULL;
 
@@ -93,6 +96,69 @@ extern "C" void SwitchLog( const char* Fmt, ... )
 		vfprintf( GSwitchLogFile, Fmt, Args );
 		va_end( Args );
 		fflush( GSwitchLogFile );
+	}
+}
+
+static bool GSwitchApmInited = false;
+static bool GSwitchClkrstInited = false;
+static ClkrstSession GSwitchClkCpu;
+
+extern "C" void SwitchApplyPerformanceProfile( void )
+{
+	// 1. Setup Mesa and system shader cache directories
+	mkdir( "sdmc:/switch/hp2/cache", 0777 );
+	mkdir( "sdmc:/switch/hp2/cache/mesa", 0777 );
+	setenv( "MESA_GLSL_CACHE_DIR", "sdmc:/switch/hp2/cache/mesa", 1 );
+	setenv( "MESA_GLSL_CACHE_MAX_SIZE", "128MB", 1 );
+	setenv( "XDG_CACHE_HOME", "sdmc:/switch/hp2/cache", 1 );
+
+	// 2. APM: GPU performance configuration
+	// 0x00020004: Official Boost handheld profile (GPU 384 MHz, EMC 1600 MHz)
+	if( !GSwitchApmInited )
+	{
+		if( R_SUCCEEDED(apmInitialize()) )
+			GSwitchApmInited = true;
+	}
+	if( GSwitchApmInited )
+	{
+		Result rc = apmSetPerformanceConfiguration( ApmPerformanceMode_Normal, 0x00020004 );
+		SwitchLog( "[SWITCH PERF] apmSetPerformanceConfiguration(Normal, 0x00020004): 0x%x\n", (unsigned)rc );
+	}
+
+	// 3. clkrst: CPU clock rate (1224 MHz - rock solid handheld clock that prevents hitches)
+	if( !GSwitchClkrstInited )
+	{
+		if( hosversionAtLeast(8, 0, 0) && R_SUCCEEDED(clkrstInitialize()) )
+		{
+			if( R_SUCCEEDED(clkrstOpenSession(&GSwitchClkCpu, PcvModuleId_CpuBus, 3)) )
+				GSwitchClkrstInited = true;
+		}
+	}
+	if( GSwitchClkrstInited )
+	{
+		Result rc = clkrstSetClockRate( &GSwitchClkCpu, 1224000000u );
+		u32 Actual = 0;
+		clkrstGetClockRate( &GSwitchClkCpu, &Actual );
+		SwitchLog( "[SWITCH PERF] clkrstSetClockRate(1224 MHz): 0x%x, actual: %.1f MHz\n", (unsigned)rc, Actual / 1e6 );
+	}
+}
+
+extern "C" void SwitchRestorePerformanceProfile( void )
+{
+	if( GSwitchClkrstInited )
+	{
+		clkrstSetClockRate( &GSwitchClkCpu, 1020000000u );
+		clkrstCloseSession( &GSwitchClkCpu );
+		clkrstExit();
+		GSwitchClkrstInited = false;
+		SwitchLog( "[SWITCH PERF] Restored CPU clock to stock (1020 MHz)\n" );
+	}
+	if( GSwitchApmInited )
+	{
+		apmSetPerformanceConfiguration( ApmPerformanceMode_Normal, 0x00020003 );
+		apmExit();
+		GSwitchApmInited = false;
+		SwitchLog( "[SWITCH PERF] Restored GPU profile to stock (307 MHz)\n" );
 	}
 }
 
@@ -5478,6 +5544,9 @@ void CleanUpOnExit( UEngine* Engine )
 	if( Engine )
 		Engine->Exit();
 	appPreExit();
+#if defined(__SWITCH__)
+	SwitchRestorePerformanceProfile();
+#endif
 }
 
 } // namespace
@@ -6239,7 +6308,7 @@ static int HP2BootAfterLauncher(
 		}
 #endif
 #if defined(__SWITCH__)
-		appletSetCpuBoostMode( ApmCpuBoostMode_Normal );
+		// Keep boost performance active throughout MainLoop
 #endif
 		if( !GIsRequestingExit )
 			MainLoop( Engine, Max( 0, TestTicks ), FixedDeltaSeconds, LifecycleReporter.get(), WorldCollisionReporter.get(), StaticBspProbe.get() );
@@ -6326,9 +6395,12 @@ static void SwitchMainThread( void* Arg )
 	FSwitchMainArgs* Args = (FSwitchMainArgs*)Arg;
 	SwitchLog( "[SWITCH THREAD] Entered 16MB Game Thread!\n" );
 #if defined(__SWITCH__)
-	appletSetCpuBoostMode( ApmCpuBoostMode_FastLoad );
+	SwitchApplyPerformanceProfile();
 #endif
 	Args->Result = RealMain( Args->ArgC, Args->ArgV );
+#if defined(__SWITCH__)
+	SwitchRestorePerformanceProfile();
+#endif
 	SwitchLog( "[SWITCH THREAD] Exiting 16MB Game Thread with result %d.\n", Args->Result );
 }
 

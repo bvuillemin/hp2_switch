@@ -242,7 +242,11 @@ void UXOpenGLRenderDevice::StaticConstructor()
 	UsePersistentBuffers = 0;
 	UseShaderDrawParameters = 0;
 	UseBufferInvalidation = 0;
+#if defined(__SWITCH__)
+	UseShaderCache = 1;
+#else
 	UseShaderCache = 0;
+#endif
 #if XOPENGL_WGL
 	ReduceMouseLag = 0;
 #endif
@@ -390,6 +394,13 @@ UBOOL UXOpenGLRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT 
 #elif MACOSX
 	// HP2's macOS renderer is deliberately limited to Apple's OpenGL 4.1 core surface.
 	OpenGLVersion = GL_Core;
+#elif defined(__SWITCH__)
+	OpenGLVersion = GL_Core;
+	UseShaderCache = 1;
+	UseAA = 0;
+	NumAASamples = 0;
+	if (MaxAnisotropy > 4.0f)
+		MaxAnisotropy = 4.0f;
 #endif
 	UseBindlessTextures = 0;
 	UsePersistentBuffers = 0;
@@ -843,6 +854,9 @@ void UXOpenGLRenderDevice::SelectGLVersion()
 #if MACOSX
 		SelectedMajorVersion = 4;
 		SelectedMinorVersion = 1;
+#elif defined(__SWITCH__)
+		SelectedMajorVersion = 4;
+		SelectedMinorVersion = 3;
 #else
 		SelectedMajorVersion = 3;
 		SelectedMinorVersion = 3;
