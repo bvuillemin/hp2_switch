@@ -19,6 +19,7 @@
 #if __UNIX__
 #include <unistd.h>
 #include <sys/stat.h>
+#include <dirent.h>
 #endif
 #if defined(__SWITCH__)
 extern "C" void SwitchLog(const char* Fmt, ...);
@@ -234,6 +235,12 @@ bool IsDirectory(const char* Directory)
 	struct stat St;
 	if (stat(Directory, &St) == 0 && S_ISDIR(St.st_mode))
 		return true;
+	DIR* D = opendir(Directory);
+	if (D)
+	{
+		closedir(D);
+		return true;
+	}
 	return false;
 #else
 	std::error_code Ec;
@@ -1808,6 +1815,10 @@ HP2PathsBootstrap BootstrapHP2Paths(int ArgC, char* const ArgV[])
 	// which is why a user whose data sat in Data/Retail was told they had no
 	// game data at all. Probing all of them here keeps the chooser's own
 	// discovery and the pre-launch bootstrap in agreement.
+#if defined(__SWITCH__)
+	Result.RetailDataRoot = "romfs:/";
+	Result.SearchedRoot = "sdmc:/switch/hp2";
+#else
 	if (DataHomePrefix)
 	{
 		char* Conventional = JoinPath(DataHomePrefix, ConventionalRetailDataSuffix);
@@ -1829,6 +1840,7 @@ HP2PathsBootstrap BootstrapHP2Paths(int ArgC, char* const ArgV[])
 			std::free(Prototype);
 		}
 	}
+#endif
 
 	if (!DataHomePrefix)
 	{
@@ -1878,7 +1890,13 @@ HP2PathsBootstrap BootstrapHP2Paths(int ArgC, char* const ArgV[])
 	}
 	else
 	{
-		DataRoot = DiscoverDevelopmentDataRoot();
+#if defined(__SWITCH__)
+		DataRoot = ValidateDataRoot("romfs:/");
+		if (!DataRoot)
+			DataRoot = ValidateDataRoot("sdmc:/switch/hp2");
+#endif
+		if (!DataRoot)
+			DataRoot = DiscoverDevelopmentDataRoot();
 		// Conventional roots, in the order the rest of the launcher prefers:
 		// the retail import destination first, then the historical Data/Unreal
 		// hand-copy location, then the prototype tree.

@@ -77,15 +77,28 @@ FOutputDeviceStdout StdoutEcho;
 
 extern "C" int setenv(const char *name, const char *value, int overwrite);
 
+extern "C" bool GSwitchHasInternalSave = false;
 extern "C" FILE* GSwitchLogFile = NULL;
 
 extern "C" void SwitchLog( const char* Fmt, ... )
 {
+#if defined(__SWITCH__)
+	char DbgBuf[1024];
+	va_list DbgArgs;
+	va_start( DbgArgs, Fmt );
+	vsnprintf( DbgBuf, sizeof(DbgBuf), Fmt, DbgArgs );
+	va_end( DbgArgs );
+	svcOutputDebugString( DbgBuf, strlen(DbgBuf) );
+#endif
 	if( !GSwitchLogFile )
 	{
 		mkdir( "sdmc:/switch", 0777 );
 		mkdir( "sdmc:/switch/hp2", 0777 );
 		GSwitchLogFile = fopen( "sdmc:/switch/hp2/boot.log", "w" );
+		if( !GSwitchLogFile && GSwitchHasInternalSave )
+		{
+			GSwitchLogFile = fopen( "save:/boot.log", "w" );
+		}
 		if( GSwitchLogFile )
 			setvbuf( GSwitchLogFile, NULL, _IONBF, 0 );
 	}
@@ -106,11 +119,21 @@ static ClkrstSession GSwitchClkCpu;
 extern "C" void SwitchApplyPerformanceProfile( void )
 {
 	// 1. Setup Mesa and system shader cache directories
+	const char* CacheDir = GSwitchHasInternalSave ? "save:/User/Cache/mesa" : "sdmc:/switch/hp2/cache/mesa";
+	const char* XdgCache = GSwitchHasInternalSave ? "save:/User/Cache" : "sdmc:/switch/hp2/cache";
+	mkdir( "sdmc:/switch", 0777 );
+	mkdir( "sdmc:/switch/hp2", 0777 );
 	mkdir( "sdmc:/switch/hp2/cache", 0777 );
 	mkdir( "sdmc:/switch/hp2/cache/mesa", 0777 );
-	setenv( "MESA_GLSL_CACHE_DIR", "sdmc:/switch/hp2/cache/mesa", 1 );
+	if( GSwitchHasInternalSave )
+	{
+		mkdir( "save:/User", 0777 );
+		mkdir( "save:/User/Cache", 0777 );
+		mkdir( "save:/User/Cache/mesa", 0777 );
+	}
+	setenv( "MESA_GLSL_CACHE_DIR", CacheDir, 1 );
 	setenv( "MESA_GLSL_CACHE_MAX_SIZE", "128MB", 1 );
-	setenv( "XDG_CACHE_HOME", "sdmc:/switch/hp2/cache", 1 );
+	setenv( "XDG_CACHE_HOME", XdgCache, 1 );
 
 	// 2. APM: GPU performance configuration
 	// 0x00020004: Official Boost handheld profile (GPU 384 MHz, EMC 1600 MHz)
@@ -162,8 +185,6 @@ extern "C" void SwitchRestorePerformanceProfile( void )
 	}
 }
 
-extern "C" bool GSwitchHasInternalSave = false;
-
 extern "C" void SwitchCommitSaveData( void )
 {
 #if defined(__SWITCH__)
@@ -177,18 +198,31 @@ extern "C" void SwitchCommitSaveData( void )
 extern "C" void SwitchInitSaveData( void )
 {
 #if defined(__SWITCH__)
-	romfsInit();
+	Result r_rc = romfsInit();
+	SwitchLog( "[SWITCH ROMFS] romfsInit returned 0x%x\n", (unsigned)r_rc );
+
 	AccountUid uid = {0};
 	if( R_SUCCEEDED(accountInitialize(AccountServiceType_Application)) )
 	{
-		if( R_FAILED(accountGetPreselectedUser(&uid)) )
-			accountGetLastOpenedUser(&uid);
+		Result a_rc = accountGetPreselectedUser(&uid);
+		SwitchLog( "[SWITCH ACCOUNT] accountGetPreselectedUser returned 0x%x, uid = %016llx%016llx\n",
+			(unsigned)a_rc, (unsigned long long)uid.uid[0], (unsigned long long)uid.uid[1] );
+		if( R_FAILED(a_rc) )
+		{
+			a_rc = accountGetLastOpenedUser(&uid);
+			SwitchLog( "[SWITCH ACCOUNT] accountGetLastOpenedUser returned 0x%x, uid = %016llx%016llx\n",
+				(unsigned)a_rc, (unsigned long long)uid.uid[0], (unsigned long long)uid.uid[1] );
+		}
 		accountExit();
 	}
 	u64 app_id = 0x0100485032000000ULL;
 	Result rc = fsdevMountSaveData( "save", app_id, uid );
+	SwitchLog( "[SWITCH SAVE] fsdevMountSaveData returned 0x%x\n", (unsigned)rc );
 	if( R_FAILED(rc) )
+	{
 		rc = fsdevMountDeviceSaveData( "save", app_id );
+		SwitchLog( "[SWITCH SAVE] fsdevMountDeviceSaveData returned 0x%x\n", (unsigned)rc );
+	}
 	if( R_FAILED(rc) )
 	{
 		FsSaveDataAttribute attr;
@@ -204,12 +238,14 @@ extern "C" void SwitchInitSaveData( void )
 		attr.save_data_rank = FsSaveDataRank_Primary;
 
 		info.save_data_size = 32 * 1024 * 1024; // 32MB save allocation
-		info.journal_size = 32 * 1024 * 1024;
+		info.journal_size = 2 * 1024 * 1024; // 2MB journal
 		info.owner_id = app_id;
 		info.save_data_space_id = FsSaveDataSpaceId_User;
 
-		fsCreateSaveDataFileSystem(&attr, &info, &meta);
+		Result c_rc = fsCreateSaveDataFileSystem(&attr, &info, &meta);
+		SwitchLog( "[SWITCH SAVE] fsCreateSaveDataFileSystem returned 0x%x\n", (unsigned)c_rc );
 		rc = fsdevMountSaveData( "save", app_id, uid );
+		SwitchLog( "[SWITCH SAVE] fsdevMountSaveData retry returned 0x%x\n", (unsigned)rc );
 	}
 
 	if( R_SUCCEEDED(rc) )
@@ -226,7 +262,7 @@ extern "C" void SwitchInitSaveData( void )
 	else
 	{
 		GSwitchHasInternalSave = false;
-		SwitchLog( "[SWITCH SAVE] Internal save mount failed (0x%x). Running in NRO mode ('sdmc:/switch/hp2/User/Save')\n", rc );
+		SwitchLog( "[SWITCH SAVE] Internal save mount failed (0x%x). Running in NRO mode ('sdmc:/switch/hp2/User/Save')\n", (unsigned)rc );
 	}
 #endif
 }
@@ -6143,7 +6179,8 @@ static int HP2BootAfterLauncher(
 	// replaced the ones installed above, and the reporter must own fatal
 	// signals to capture frames before the guard unwinds.
 	HP2InstallCrashReporter(&CrashConfig);
-	strncpy( GModule, ArgV[0], sizeof(GModule) - 1 );
+	const char* ModuleName = (ArgC > 0 && ArgV && ArgV[0]) ? ArgV[0] : "hp2_game";
+	strncpy( GModule, ModuleName, sizeof(GModule) - 1 );
 	GModule[sizeof(GModule) - 1] = 0;
 #endif // !_MSC_VER
 #ifndef _DEBUG
@@ -6470,8 +6507,8 @@ static void SwitchMainThread( void* Arg )
 	FSwitchMainArgs* Args = (FSwitchMainArgs*)Arg;
 	SwitchLog( "[SWITCH THREAD] Entered 16MB Game Thread!\n" );
 #if defined(__SWITCH__)
-	SwitchApplyPerformanceProfile();
 	SwitchInitSaveData();
+	SwitchApplyPerformanceProfile();
 #endif
 	Args->Result = RealMain( Args->ArgC, Args->ArgV );
 #if defined(__SWITCH__)

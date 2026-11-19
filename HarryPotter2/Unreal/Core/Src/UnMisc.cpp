@@ -2195,7 +2195,11 @@ CORE_API void appInit( const TCHAR* InPackage, const TCHAR* InCmdLine, FMalloc* 
 					break;
 			}
 			GSys->MapPath = appBaseDir();
-			GSys->MapPath = GSys->MapPath.Left( GSys->MapPath.InStr(TEXT("System")));
+			INT SystemIdx = GSys->MapPath.InStr(TEXT("System"));
+			if( SystemIdx == INDEX_NONE )
+				SystemIdx = GSys->MapPath.InStr(TEXT("system"));
+			if( SystemIdx != INDEX_NONE )
+				GSys->MapPath = GSys->MapPath.Left( SystemIdx );
 			GSys->MapPath += GSys->Paths(i).Left( SeparatorIndex ).Right(4);
 			break;
 		}
