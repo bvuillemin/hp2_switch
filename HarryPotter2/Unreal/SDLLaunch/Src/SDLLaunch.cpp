@@ -213,9 +213,24 @@ extern "C" void SwitchInitSaveData( void )
 			SwitchLog( "[SWITCH ACCOUNT] accountGetLastOpenedUser returned 0x%x, uid = %016llx%016llx\n",
 				(unsigned)a_rc, (unsigned long long)uid.uid[0], (unsigned long long)uid.uid[1] );
 		}
+		if( R_FAILED(a_rc) )
+		{
+			s32 total = 0;
+			if( R_SUCCEEDED(accountListAllUsers(&uid, 1, &total)) && total > 0 )
+			{
+				SwitchLog( "[SWITCH ACCOUNT] accountListAllUsers found %d users, using uid = %016llx%016llx\n",
+					total, (unsigned long long)uid.uid[0], (unsigned long long)uid.uid[1] );
+			}
+		}
 		accountExit();
 	}
 	u64 app_id = 0x0100485032000000ULL;
+	u64 cur_app_id = 0;
+	if( R_SUCCEEDED(svcGetInfo(&cur_app_id, InfoType_ProgramId, CUR_PROCESS_HANDLE, 0)) && cur_app_id != 0 )
+	{
+		app_id = cur_app_id;
+	}
+	SwitchLog( "[SWITCH SAVE] Using app_id = 0x%016llx\n", (unsigned long long)app_id );
 	Result rc = fsdevMountSaveData( "save", app_id, uid );
 	SwitchLog( "[SWITCH SAVE] fsdevMountSaveData returned 0x%x\n", (unsigned)rc );
 	if( R_FAILED(rc) )
@@ -342,13 +357,41 @@ u64 __nx_exception_stack_size = sizeof(__nx_exception_stack);
 
 extern "C" void __libnx_exception_handler(ThreadExceptionDump *ctx)
 {
-	SwitchLog("\n[SWITCH CRASH] === Unhandled CPU Hardware Exception ===\n");
-	SwitchLog("  error_desc: 0x%08x\n", ctx->error_desc);
-	SwitchLog("  pc:  0x%016lx\n", (unsigned long)ctx->pc.x);
-	SwitchLog("  lr:  0x%016lx\n", (unsigned long)ctx->lr.x);
-	SwitchLog("  sp:  0x%016lx\n", (unsigned long)ctx->sp.x);
-	SwitchLog("  fp:  0x%016lx\n", (unsigned long)ctx->fp.x);
-	SwitchLog("  far: 0x%016lx\n", (unsigned long)ctx->far.x);
+	char Buf[1024];
+	snprintf(Buf, sizeof(Buf),
+		"\n\n================ [SWITCH CRASH DUMP] ================\n"
+		"Error Desc: 0x%x\n"
+		"PC:  0x%016llx\n"
+		"LR:  0x%016llx\n"
+		"SP:  0x%016llx\n"
+		"FP:  0x%016llx\n"
+		"FAR: 0x%016llx\n"
+		"ESR: 0x%08x\n"
+		"PSTATE: 0x%08x\n"
+		"====================================================\n\n",
+		(unsigned)ctx->error_desc,
+		(unsigned long long)ctx->pc.x,
+		(unsigned long long)ctx->lr.x,
+		(unsigned long long)ctx->sp.x,
+		(unsigned long long)ctx->fp.x,
+		(unsigned long long)ctx->far.x,
+		(unsigned)ctx->esr,
+		(unsigned)ctx->pstate
+	);
+	svcOutputDebugString(Buf, strlen(Buf));
+	mkdir("sdmc:/switch", 0777);
+	mkdir("sdmc:/switch/hp2", 0777);
+	FILE* F = fopen("sdmc:/switch/hp2/crash.log", "w");
+	if (!F && GSwitchHasInternalSave)
+		F = fopen("save:/crash.log", "w");
+	if (F)
+	{
+		fputs(Buf, F);
+		for (int i = 0; i < 29; i++)
+			fprintf(F, "X[%02d]: 0x%016llx\n", i, (unsigned long long)ctx->cpu_gprs[i].x);
+		fclose(F);
+	}
+	SwitchLog("%s", Buf);
 	for(int i = 0; i < 28; i += 2)
 	{
 		SwitchLog("  x%d: 0x%016lx  x%d: 0x%016lx\n",
@@ -359,6 +402,7 @@ extern "C" void __libnx_exception_handler(ThreadExceptionDump *ctx)
 	{
 		fflush( GSwitchLogFile );
 	}
+	svcBreak(0, 0, 0);
 }
 #endif
 

@@ -112,7 +112,7 @@ char* CanonicalizeExistingDirectory(const char* Directory);
 #if defined(__SWITCH__)
 char* ResolveDataHomePrefix()
 {
-	const char* SwitchRoot = GSwitchHasInternalSave ? "save:" : "sdmc:/switch/hp2";
+	const char* SwitchRoot = GSwitchHasInternalSave ? "save:/" : "sdmc:/switch/hp2";
 	size_t Length = std::strlen(SwitchRoot);
 	char* Copy = static_cast<char*>(std::malloc(Length + 1));
 	if (Copy)
@@ -240,6 +240,35 @@ bool IsDirectory(const char* Directory)
 	{
 		closedir(D);
 		return true;
+	}
+	// Check with/without trailing slash for directories
+	size_t DirLen = std::strlen(Directory);
+	if (DirLen > 0 && Directory[DirLen - 1] == '/')
+	{
+		char NoSlash[1024];
+		if (DirLen < sizeof(NoSlash))
+		{
+			std::strncpy(NoSlash, Directory, sizeof(NoSlash) - 1);
+			NoSlash[DirLen - 1] = 0;
+			struct stat St2;
+			if (stat(NoSlash, &St2) == 0 && S_ISDIR(St2.st_mode))
+				return true;
+			DIR* D2 = opendir(NoSlash);
+			if (D2) { closedir(D2); return true; }
+		}
+	}
+	else
+	{
+		char WithSlash[1024];
+		if (DirLen + 2 <= sizeof(WithSlash))
+		{
+			std::snprintf(WithSlash, sizeof(WithSlash), "%s/", Directory);
+			struct stat St2;
+			if (stat(WithSlash, &St2) == 0 && S_ISDIR(St2.st_mode))
+				return true;
+			DIR* D2 = opendir(WithSlash);
+			if (D2) { closedir(D2); return true; }
+		}
 	}
 	return false;
 #else
@@ -1347,18 +1376,20 @@ bool EnsureDirectoryTree(const char* Directory, int Mode)
 	char* Colon = std::strchr(Buffer, ':');
 	if (Colon)
 		Start = Colon + 1;
+	while (*Start == '/' || *Start == '\\')
+		Start++;
 	for (char* P = Start; *P; ++P)
 	{
 		if (*P == '/' || *P == '\\')
 		{
-			if (P == Start) continue;
 			char Saved = *P;
 			*P = 0;
 			mkdir(Buffer, 0777);
 			*P = Saved;
 		}
 	}
-	mkdir(Buffer, 0777);
+	if (*Start)
+		mkdir(Buffer, 0777);
 	return IsDirectory(Directory);
 #else
 	const std::filesystem::path Path = std::filesystem::u8path(Directory);
@@ -1405,8 +1436,25 @@ bool EnsureWritableChildDirectory(const char* Parent, const char* Child, int Mod
 char* PrepareLauncherRoot(const char* DataHomePrefix)
 {
 #if defined(__SWITCH__)
-	char* ApplicationSupport = JoinPath(DataHomePrefix, "");
-#elif MACOSX
+	char* UserRoot = JoinPath(DataHomePrefix, UserSuffix);
+	if (!UserRoot || !EnsureDirectoryTree(UserRoot, 0777))
+	{
+		SwitchLog("[SWITCH ERROR] PrepareLauncherRoot failed to ensure UserRoot='%s'\n",
+			UserRoot ? UserRoot : "(null)");
+		std::free(UserRoot);
+		return nullptr;
+	}
+	char* CanonicalUserRoot = CanonicalizeExistingDirectory(UserRoot);
+	std::free(UserRoot);
+	if (!CanonicalUserRoot || !IsWritableDirectory(CanonicalUserRoot))
+	{
+		SwitchLog("[SWITCH ERROR] PrepareLauncherRoot failed to canonicalize or write to UserRoot\n");
+		std::free(CanonicalUserRoot);
+		return nullptr;
+	}
+	return CanonicalUserRoot;
+#else
+#if MACOSX
 	char* ApplicationSupport = JoinPath(
 		DataHomePrefix, "Library/Application Support/Harry Potter 2");
 #elif HP2_WINDOWS
@@ -1433,13 +1481,18 @@ char* PrepareLauncherRoot(const char* DataHomePrefix)
 		return nullptr;
 	}
 	return CanonicalUserRoot;
+#endif
 }
 
 char* PrepareActiveUserRoot(const char* UserRoot)
 {
 #if defined(__SWITCH__)
 	if (!UserRoot || !EnsureDirectoryTree(UserRoot, 0777))
+	{
+		SwitchLog("[SWITCH ERROR] PrepareActiveUserRoot failed to ensure UserRoot='%s'\n",
+			UserRoot ? UserRoot : "(null)");
 		return nullptr;
+	}
 #else
 	if (!UserRoot || !std::filesystem::u8path(UserRoot).is_absolute()
 		|| !EnsureDirectoryTree(UserRoot, 0700))
@@ -1449,6 +1502,7 @@ char* PrepareActiveUserRoot(const char* UserRoot)
 	char* CanonicalUserRoot = CanonicalizeExistingDirectory(UserRoot);
 	if (!CanonicalUserRoot || !IsWritableDirectory(CanonicalUserRoot))
 	{
+		SwitchLog("[SWITCH ERROR] PrepareActiveUserRoot failed to canonicalize UserRoot\n");
 		std::free(CanonicalUserRoot);
 		return nullptr;
 	}
@@ -1458,6 +1512,7 @@ char* PrepareActiveUserRoot(const char* UserRoot)
 		&& EnsureWritableChildDirectory(CanonicalUserRoot, "Cache", 0700);
 	if (!Success)
 	{
+		SwitchLog("[SWITCH ERROR] PrepareActiveUserRoot failed to create child Save/Cache dirs\n");
 		std::free(CanonicalUserRoot);
 		return nullptr;
 	}
@@ -1955,9 +2010,26 @@ HP2PathsBootstrap BootstrapHP2Paths(int ArgC, char* const ArgV[])
 		CanonicalSystem = CanonicalizeExistingDirectory(SystemDirectory);
 		std::free(SystemDirectory);
 	}
+#if defined(__SWITCH__)
+	if (!CanonicalSystem)
+	{
+		char RomfsSystem[128];
+		std::snprintf(RomfsSystem, sizeof(RomfsSystem), "%s/system", DataRoot);
+		char* TestIni = JoinPath(RomfsSystem, "default.ini");
+		if (IsReadableFile(TestIni))
+		{
+			size_t len = std::strlen(RomfsSystem);
+			CanonicalSystem = static_cast<char*>(std::malloc(len + 1));
+			if (CanonicalSystem)
+				std::memcpy(CanonicalSystem, RomfsSystem, len + 1);
+		}
+		std::free(TestIni);
+	}
+#endif
 	std::free(DataRoot);
 	if (!CanonicalSystem)
 	{
+		SwitchLog("[SWITCH ERROR] could not canonicalize the validated System directory\n");
 		std::fprintf(stderr, "hp2: could not canonicalize the validated System directory\n");
 		std::free(UserRoot);
 		return Result;
