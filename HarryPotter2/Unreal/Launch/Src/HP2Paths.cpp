@@ -22,6 +22,7 @@
 #include <dirent.h>
 #endif
 #if defined(__SWITCH__)
+#include <switch.h>
 extern "C" void SwitchLog(const char* Fmt, ...);
 extern "C" bool GSwitchHasInternalSave;
 #endif
@@ -112,7 +113,7 @@ char* CanonicalizeExistingDirectory(const char* Directory);
 #if defined(__SWITCH__)
 char* ResolveDataHomePrefix()
 {
-	const char* SwitchRoot = GSwitchHasInternalSave ? "save:/" : "sdmc:/switch/hp2";
+	const char* SwitchRoot = (envIsNso() && GSwitchHasInternalSave) ? "save:/" : "sdmc:/switch/hp2";
 	size_t Length = std::strlen(SwitchRoot);
 	char* Copy = static_cast<char*>(std::malloc(Length + 1));
 	if (Copy)
@@ -1871,8 +1872,16 @@ HP2PathsBootstrap BootstrapHP2Paths(int ArgC, char* const ArgV[])
 	// game data at all. Probing all of them here keeps the chooser's own
 	// discovery and the pre-launch bootstrap in agreement.
 #if defined(__SWITCH__)
-	Result.RetailDataRoot = "romfs:/";
-	Result.SearchedRoot = "sdmc:/switch/hp2";
+	if (envIsNso())
+	{
+		Result.RetailDataRoot = "romfs:/";
+		Result.SearchedRoot = "sdmc:/switch/hp2";
+	}
+	else
+	{
+		Result.RetailDataRoot = "sdmc:/switch/hp2";
+		Result.SearchedRoot = "sdmc:/switch/hp2";
+	}
 #else
 	if (DataHomePrefix)
 	{
@@ -1946,9 +1955,16 @@ HP2PathsBootstrap BootstrapHP2Paths(int ArgC, char* const ArgV[])
 	else
 	{
 #if defined(__SWITCH__)
-		DataRoot = ValidateDataRoot("romfs:/");
-		if (!DataRoot)
+		if (envIsNso())
+		{
+			DataRoot = ValidateDataRoot("romfs:/");
+			if (!DataRoot)
+				DataRoot = ValidateDataRoot("sdmc:/switch/hp2");
+		}
+		else
+		{
 			DataRoot = ValidateDataRoot("sdmc:/switch/hp2");
+		}
 #endif
 		if (!DataRoot)
 			DataRoot = DiscoverDevelopmentDataRoot();

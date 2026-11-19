@@ -198,6 +198,14 @@ extern "C" void SwitchCommitSaveData( void )
 extern "C" void SwitchInitSaveData( void )
 {
 #if defined(__SWITCH__)
+	if( !envIsNso() )
+	{
+		SwitchLog( "[SWITCH SAVE] Running as NRO: using SD card storage ('sdmc:/switch/hp2')\n" );
+		GSwitchHasInternalSave = false;
+		return;
+	}
+
+	SwitchLog( "[SWITCH SAVE] Running as NSO (Standalone NSP): mounting internal save...\n" );
 	Result r_rc = romfsInit();
 	SwitchLog( "[SWITCH ROMFS] romfsInit returned 0x%x\n", (unsigned)r_rc );
 
@@ -6670,46 +6678,73 @@ int main( int ArgC, char* ArgV[] )
 	const bool ShowLauncher = false;
 	if( EngineCommandLine.Len() == 0 || EngineCommandLine.InStr(TEXT(".unr")) == INDEX_NONE )
 	{
-		std::string Root = Bootstrap.SearchedRoot.empty() ? Bootstrap.RetailDataRoot : Bootstrap.SearchedRoot;
-		if( !Root.empty() && Root.back() != '/' && Root.back() != '\\' )
-			Root += "/";
+		std::string ActiveUserDir = std::string(TCHAR_TO_ANSI(appUserDir()));
+		if( !ActiveUserDir.empty() && ActiveUserDir.back() != '/' && ActiveUserDir.back() != '\\' )
+			ActiveUserDir += "/";
 
-		std::string CandidatePaths[] = {
-			"save:/User/Save/Slot0/Save0.usa",
-			"save:/User/Save/Save0.usa",
-			"save:/Save/Slot0/Save0.usa",
-			"save:/Save/Save0.usa",
-			Root + "User/Save/Slot0/Save0.usa",
-			Root + "User/Save/Save0.usa",
-			"sdmc:/switch/hp2/User/Save/Slot0/Save0.usa",
-			"sdmc:/switch/hp2/User/Save/Save0.usa",
-			"User/Save/Slot0/Save0.usa",
-			"User/Save/Save0.usa"
-		};
+		std::string ActiveSave0 = ActiveUserDir + "Save/Slot0/Save0.usa";
 
-		bool Save0Exists = false;
-		std::string FoundPath = "";
-		struct stat St;
-		for( const auto& Path : CandidatePaths )
+		// If running in NSP internal save mode, check if we need to migrate an existing save from SD card
+		if( GSwitchHasInternalSave )
 		{
-			if( stat( Path.c_str(), &St ) == 0 && St.st_size > 1024 )
+			struct stat StActive;
+			if( stat( ActiveSave0.c_str(), &StActive ) != 0 || StActive.st_size <= 1024 )
 			{
-				Save0Exists = true;
-				FoundPath = Path;
-				break;
+				const char* SdSavePaths[] = {
+					"sdmc:/switch/hp2/User/Save/Slot0/Save0.usa",
+					"sdmc:/switch/hp2/User/Save/Save0.usa"
+				};
+				for( const auto& SdPath : SdSavePaths )
+				{
+					struct stat StSd;
+					if( stat( SdPath, &StSd ) == 0 && StSd.st_size > 1024 )
+					{
+						SwitchLog( "[SWITCH SAVE] Migrating save from SD card '%s' to '%s' (%lld bytes)...\n",
+							SdPath, ActiveSave0.c_str(), (long long)StSd.st_size );
+						mkdir( "save:/User", 0777 );
+						mkdir( "save:/User/Save", 0777 );
+						mkdir( "save:/User/Save/Slot0", 0777 );
+						mkdir( "save:/User/Save/Slot0/cache", 0777 );
+						FILE* In = fopen( SdPath, "rb" );
+						FILE* Out = fopen( ActiveSave0.c_str(), "wb" );
+						if( In && Out )
+						{
+							char CopyBuf[65536];
+							size_t ReadBytes = 0;
+							while( (ReadBytes = fread(CopyBuf, 1, sizeof(CopyBuf), In)) > 0 )
+							{
+								fwrite(CopyBuf, 1, ReadBytes, Out);
+							}
+							fclose(In);
+							fclose(Out);
+							SwitchCommitSaveData();
+							SwitchLog( "[SWITCH SAVE] Save migration complete!\n" );
+						}
+						else
+						{
+							if( In ) fclose(In);
+							if( Out ) fclose(Out);
+							SwitchLog( "[SWITCH SAVE ERROR] Migration failed to open file!\n" );
+						}
+						break;
+					}
+				}
 			}
 		}
 
+		struct stat StFinal;
+		bool HasValidSave0 = (stat( ActiveSave0.c_str(), &StFinal ) == 0 && StFinal.st_size > 1024);
+
 		std::string LaunchPrefix;
-		if( Save0Exists )
+		if( HasValidSave0 )
 		{
-			SwitchLog( "[SWITCH SAVE] Found valid Save0 (%lld bytes) at '%s'. Continuing saved game...\n",
-				(long long)St.st_size, FoundPath.c_str() );
+			SwitchLog( "[SWITCH SAVE] Active Save0 found (%lld bytes) at '%s'. Continuing saved game...\n",
+				(long long)StFinal.st_size, ActiveSave0.c_str() );
 			LaunchPrefix = "Startup.unr -LOAD=0 -SAVESLOT=0";
 		}
 		else
 		{
-			SwitchLog( "[SWITCH SAVE] No valid Save0 found. Starting New Game at PrivetDr.unr...\n" );
+			SwitchLog( "[SWITCH SAVE] No Save0 found at '%s'. Starting New Game at PrivetDr.unr...\n", ActiveSave0.c_str() );
 			LaunchPrefix = "PrivetDr.unr -SAVESLOT=0";
 		}
 
