@@ -21,6 +21,7 @@
 #endif
 #if defined(__SWITCH__)
 #include <switch.h>
+#include <sys/stat.h>
 #endif
 
 #include "FConfigCacheIni.h"
@@ -6440,48 +6441,42 @@ int main( int ArgC, char* ArgV[] )
 	const bool ShowLauncher = false;
 	if( EngineCommandLine.Len() == 0 || EngineCommandLine.InStr(TEXT(".unr")) == INDEX_NONE )
 	{
-		std::vector<SaveRecord> DiscoveredSaves;
-		std::string SaveError;
-		std::string UserRoot = Bootstrap.SearchedRoot + "/User";
-		DiscoverSaves( UserRoot, DiscoveredSaves, SaveError );
+		std::string Root = Bootstrap.SearchedRoot.empty() ? Bootstrap.RetailDataRoot : Bootstrap.SearchedRoot;
+		if( !Root.empty() && Root.back() != '/' && Root.back() != '\\' )
+			Root += "/";
 
-		auto IsValidGameSave = []( const std::string& SavePath ) -> bool
-		{
-			FILE* F = fopen( SavePath.c_str(), "rb" );
-			if( !F ) return false;
-			char Buf[8192];
-			size_t Read = fread( Buf, 1, sizeof(Buf), F );
-			fclose( F );
-			if( Read < 256 ) return false;
-			std::string Data( Buf, Read );
-			if( Data.find( "Startup" ) != std::string::npos || Data.find( "startup" ) != std::string::npos )
-				return false;
-			return true;
+		std::string CandidatePaths[] = {
+			Root + "User/Save/Slot0/Save0.usa",
+			Root + "User/Save/Save0.usa",
+			"sdmc:/switch/hp2/User/Save/Slot0/Save0.usa",
+			"sdmc:/switch/hp2/User/Save/Save0.usa",
+			"User/Save/Slot0/Save0.usa",
+			"User/Save/Save0.usa"
 		};
 
-		std::string LaunchPrefix;
-		bool FoundGoodSave = false;
-		for( const auto& Save : DiscoveredSaves )
+		bool Save0Exists = false;
+		std::string FoundPath = "";
+		struct stat St;
+		for( const auto& Path : CandidatePaths )
 		{
-			if( IsValidGameSave( Save.savePath ) )
+			if( stat( Path.c_str(), &St ) == 0 && St.st_size > 1024 )
 			{
-				SwitchLog( "[SWITCH SAVE] Found valid save: %s (saveIndex=%d, slot=%d). Continuing...\n",
-					Save.displayName.c_str(), Save.saveIndex, Save.slot );
-				LaunchPrefix = "Startup.unr -LOAD=" + std::to_string(Save.saveIndex);
-				if( Save.usesSlotDirectory )
-					LaunchPrefix += " -SAVESLOT=" + std::to_string(Save.slot);
-				FoundGoodSave = true;
+				Save0Exists = true;
+				FoundPath = Path;
 				break;
-			}
-			else
-			{
-				SwitchLog( "[SWITCH SAVE] Skipping invalid/startup save: %s\n", Save.savePath.c_str() );
 			}
 		}
 
-		if( !FoundGoodSave )
+		std::string LaunchPrefix;
+		if( Save0Exists )
 		{
-			SwitchLog( "[SWITCH SAVE] No valid gameplay saves found. Starting New Game at PrivetDr.unr...\n" );
+			SwitchLog( "[SWITCH SAVE] Found valid Save0 (%lld bytes) at '%s'. Continuing saved game...\n",
+				(long long)St.st_size, FoundPath.c_str() );
+			LaunchPrefix = "Startup.unr -LOAD=0 -SAVESLOT=0";
+		}
+		else
+		{
+			SwitchLog( "[SWITCH SAVE] No valid Save0 found. Starting New Game at PrivetDr.unr...\n" );
 			LaunchPrefix = "PrivetDr.unr -SAVESLOT=0";
 		}
 

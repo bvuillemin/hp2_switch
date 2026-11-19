@@ -219,7 +219,12 @@ FURL::FURL( FURL* Base, const TCHAR* TextURL, ETravelType Type )
 	// Handle pure filenames.
 	UBOOL FarHost=0;
 	UBOOL FarMap=0;
-	if( appStrlen(URL)>2 && URL[1]==':' )
+	if( (appStrlen(URL)>2 && URL[1]==':')
+		|| (appStrnicmp(URL, TEXT("sdmc:"), 5) == 0)
+		|| (appStrnicmp(URL, TEXT("romfs:"), 6) == 0)
+		|| (URL[0] == '/' && URL[1] != '/')
+		|| (URL[0] == '\\' && URL[1] != '\\')
+	)
 	{
 		// Pure filename.
 		Protocol = DefaultProtocol;

@@ -12,6 +12,9 @@
 #include <string.h>
 #if defined(__SWITCH__)
 	#include <switch.h>
+	#include <sys/stat.h>
+	#include <string>
+	extern "C" void SwitchLog(const char* Fmt, ...);
 #endif
 #if __UNIX__
 	#include <sys/wait.h>
@@ -393,6 +396,54 @@ void USDLViewport::UpdateInput( UBOOL Reset )
 	padUpdate( &s_SwitchPad );
 	const u64 kDown = padGetButtonsDown( &s_SwitchPad );
 	const u64 kUp   = padGetButtonsUp( &s_SwitchPad );
+	const u64 kHeld = padGetButtons( &s_SwitchPad );
+
+	// Combo: L + R + Plus + Minus loads latest Save 0
+	const u64 kCombo = HidNpadButton_L | HidNpadButton_R | HidNpadButton_Plus | HidNpadButton_Minus;
+	static bool s_ComboActive = false;
+	if( (kHeld & kCombo) == kCombo )
+	{
+		if( !s_ComboActive )
+		{
+			s_ComboActive = true;
+			struct stat St;
+			bool HasSave0 = false;
+			std::string FoundPath = "";
+			std::string CandidatePaths[] = {
+				"sdmc:/switch/hp2/User/Save/Slot0/Save0.usa",
+				"sdmc:/switch/hp2/User/Save/Save0.usa",
+				"User/Save/Slot0/Save0.usa",
+				"User/Save/Save0.usa"
+			};
+			for( const auto& Path : CandidatePaths )
+			{
+				if( stat( Path.c_str(), &St ) == 0 && St.st_size > 1024 )
+				{
+					HasSave0 = true;
+					FoundPath = Path;
+					break;
+				}
+			}
+
+			if( HasSave0 && C && C->Engine )
+			{
+				SwitchLog( "[SWITCH INPUT] L + R + Plus + Minus detected! Loading Save0 from '%s'...\n", FoundPath.c_str() );
+				if( Actor )
+					Actor->bShowMenu = 0;
+				bShowWindowsMouse = 0;
+				C->Engine->Exec( TEXT("LOADGAME 0") );
+			}
+			else
+			{
+				SwitchLog( "[SWITCH INPUT] L + R + Plus + Minus pressed, but Save0 was not found on SD card.\n" );
+			}
+		}
+		return;
+	}
+	else
+	{
+		s_ComboActive = false;
+	}
 
 	auto HandleBtn = [this, kDown, kUp]( u64 Mask, EInputKey Key )
 	{

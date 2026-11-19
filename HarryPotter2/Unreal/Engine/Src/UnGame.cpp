@@ -364,6 +364,9 @@ void UGameEngine::Init()
 		if( !appFormatLoadGameURL(LoadGameSlot,LoadURL,ARRAY_COUNT(LoadURL)) )
 			appErrorf(TEXT("Invalid startup load slot %i"),LoadGameSlot);
 		debugf( NAME_Log, TEXT("Loading game slot %i"), LoadGameSlot );
+		GLevel->GetLevelInfo()->Pauser = TEXT("");
+		GLevel->GetLevelInfo()->NextSwitchCountdown = 0.0f;
+		GLevel->GetLevelInfo()->NextURL = TEXT("");
 		GLevel->GetLevelInfo()->eventServerTravel(LoadURL, 0);
 	}
 
@@ -574,7 +577,7 @@ UBOOL UGameEngine::Exec( const TCHAR* Cmd, FOutputDevice& Ar )
 	{
 		if( appIsDigit(Str[0]) )
 		{
-			if( !GLevel || GLevel->GetLevelInfo()->NextURL!=TEXT("") )
+			if( !GLevel )
 				return 1;
 
 			// Whenever we try to load a game we should first load our persistentActorCache.
@@ -583,10 +586,15 @@ UBOOL UGameEngine::Exec( const TCHAR* Cmd, FOutputDevice& Ar )
 			const INT Slot = appAtoi(Str);
 			GFileManager->MakeDirectory( *GSys->SavePath, 0 );
 			GFileManager->MakeDirectory( *GSys->SaveSlotPath, 0 );
-			debugf( NAME_Log, TEXT("Loading game slot %i"), Slot );
+			debugf( NAME_Log, TEXT("Loading game slot %i (SaveSlotPath: %s)"), Slot, *GSys->SaveSlotPath );
 			TCHAR LoadURL[32];
 			if( appFormatLoadGameURL(Slot,LoadURL,ARRAY_COUNT(LoadURL)) )
+			{
+				GLevel->GetLevelInfo()->Pauser = TEXT("");
+				GLevel->GetLevelInfo()->NextSwitchCountdown = 0.0f;
+				GLevel->GetLevelInfo()->NextURL = TEXT("");
 				GLevel->GetLevelInfo()->eventServerTravel(LoadURL,0);
+			}
 		}
 		return 1;
 	}
@@ -834,6 +842,7 @@ UBOOL UGameEngine::Browse( FURL URL, const TMap<FString,FString>* TravelInfo, FS
 		FPushMemTag Push(TEXT("LoadGame"));
 		const INT Slot = appAtoi(Option);
 		FString Error, Temp=FString::Printf( TEXT("%s") PATH_SEPARATOR TEXT("Save%i.usa"), *GSys->SaveSlotPath, Slot );
+		debugf( NAME_Log, TEXT("Browse: Loading savegame file %s"), *Temp );
 		FURL SaveURL(*Temp);
 		SaveURL.AddOption(TEXT("load"));
 		if( LoadMap(SaveURL,NULL,NULL,Error) )
@@ -2043,29 +2052,6 @@ void UGameEngine::Tick( FLOAT DeltaSeconds )
 		return;
 	}
 	unguard;
-
-#if defined(__SWITCH__)
-	static bool s_InitialSaveDone = false;
-	if( !s_InitialSaveDone && GLevel && GLevel->TimeSeconds > 2.0f && Client && Client->Viewports.Num() )
-	{
-		const TCHAR* MapOuterName = GLevel->GetOuter()->GetName();
-		if( appStricmp(MapOuterName, TEXT("Entry")) != 0 && appStricmp(MapOuterName, TEXT("Startup")) != 0 )
-		{
-			s_InitialSaveDone = true;
-			TCHAR InitialSavePath[256];
-			appSprintf( InitialSavePath, TEXT("%s") PATH_SEPARATOR TEXT("Save0.usa"), *GSys->SaveSlotPath );
-			if( GFileManager->FileSize(InitialSavePath) <= 0 )
-			{
-				APlayerPawn* InitialPlayer = Client->Viewports(0)->Actor;
-				if( InitialPlayer )
-				{
-					debugf( NAME_Log, TEXT("[SWITCH AUTO-SAVE] No save exists yet. Queuing initial game save for: %s"), InitialSavePath );
-					InitialPlayer->bQueuedToSaveGame = true;
-				}
-			}
-		}
-	}
-#endif
 
 	// HP2 specific - Handle player saving
 	guard(PlayerSaving);
