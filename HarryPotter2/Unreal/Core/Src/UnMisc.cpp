@@ -2246,6 +2246,9 @@ CORE_API void SavePersistentActorCache( void )
 	// Copy all the _pa files from the cache to the imediate SaveSlotPath
 	Spec  = GSys->SaveSlotPath * TEXT("cache") * TEXT("*_pa.*");
 	Files = GFileManager->FindFiles( *Spec, true, false );
+#if defined(__SWITCH__)
+	SwitchLog( "[SWITCH PA] SavePersistentActorCache: Found %i cached PA files to copy to '%ls'\n", Files.Num(), *GSys->SaveSlotPath );
+#endif
 	
 	for( INT j=0; Files.IsValidIndex(j); j++ )
 	{
@@ -2255,6 +2258,9 @@ CORE_API void SavePersistentActorCache( void )
 			GFileManager->Copy( *(GSys->SaveSlotPath * Files(j)), *PAFileName, true, true );
 		}
 	}
+#if defined(__SWITCH__)
+	SwitchCommitSaveData();
+#endif
 }
 
 
@@ -2282,6 +2288,9 @@ CORE_API void LoadPersistentActorCache( void )
 	// Copy pa files from our saveGameSlot to our cache
 	Spec  = GSys->SaveSlotPath * TEXT("*_pa.*");
 	Files = GFileManager->FindFiles( *Spec, true, false );
+#if defined(__SWITCH__)
+	SwitchLog( "[SWITCH PA] LoadPersistentActorCache: Found %i PA files to restore to cache\n", Files.Num() );
+#endif
 		
 	// Copy all _pa files from our SaveGame dir to our cache dir
 	for( INT j=0; Files.IsValidIndex(j); j++ )

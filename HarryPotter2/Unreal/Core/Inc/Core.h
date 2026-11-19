@@ -570,6 +570,7 @@ CORE_API extern UBOOL					GIsClient;
 CORE_API extern UBOOL					GIsServer;
 #if defined(__SWITCH__)
 extern "C" CORE_API void SwitchLog( const char* Fmt, ... );
+extern "C" CORE_API void SwitchCommitSaveData( void );
 #endif
 CORE_API extern UBOOL					GIsCriticalError;
 CORE_API extern UBOOL					GIsStarted;

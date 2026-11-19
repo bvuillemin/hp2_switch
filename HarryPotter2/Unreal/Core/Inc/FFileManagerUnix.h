@@ -30,6 +30,9 @@
 #ifndef ftello
 #define ftello ftell
 #endif
+#ifndef lstat
+#define lstat stat
+#endif
 #endif
 
 namespace

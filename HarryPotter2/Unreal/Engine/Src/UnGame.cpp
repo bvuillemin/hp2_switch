@@ -596,6 +596,9 @@ UBOOL UGameEngine::Exec( const TCHAR* Cmd, FOutputDevice& Ar )
 			GFileManager->MakeDirectory( *GSys->SavePath, 0 );
 			GFileManager->MakeDirectory( *GSys->SaveSlotPath, 0 );
 			debugf( NAME_Log, TEXT("Loading game slot %i (SaveSlotPath: %s)"), Slot, *GSys->SaveSlotPath );
+#if defined(__SWITCH__)
+			SwitchLog( "[SWITCH LOAD] Executing LOADGAME %i (SaveSlotPath: '%ls')...\n", Slot, *GSys->SaveSlotPath );
+#endif
 			TCHAR LoadURL[32];
 			if( appFormatLoadGameURL(Slot,LoadURL,ARRAY_COUNT(LoadURL)) )
 			{
@@ -852,10 +855,16 @@ UBOOL UGameEngine::Browse( FURL URL, const TMap<FString,FString>* TravelInfo, FS
 		const INT Slot = appAtoi(Option);
 		FString Error, Temp=FString::Printf( TEXT("%s") PATH_SEPARATOR TEXT("Save%i.usa"), *GSys->SaveSlotPath, Slot );
 		debugf( NAME_Log, TEXT("Browse: Loading savegame file %s"), *Temp );
+#if defined(__SWITCH__)
+		SwitchLog( "[SWITCH LOAD] Browse: Loading savegame file '%ls' (size=%i)...\n", *Temp, GFileManager->FileSize(*Temp) );
+#endif
 		FURL SaveURL(*Temp);
 		SaveURL.AddOption(TEXT("load"));
 		if( LoadMap(SaveURL,NULL,NULL,Error) )
 		{
+#if defined(__SWITCH__)
+			SwitchLog( "[SWITCH LOAD] LoadMap succeeded for '%ls'!\n", *Temp );
+#endif
 			// Copy the hub stack.
 			INT i;
 			for( i=0; i<GLevel->GetLevelInfo()->HubStackLevel; i++ )
@@ -877,7 +886,13 @@ UBOOL UGameEngine::Browse( FURL URL, const TMap<FString,FString>* TravelInfo, FS
 			LastURL = GLevel->URL;
 			return 1;
 		}
-		else return 0;
+		else
+		{
+#if defined(__SWITCH__)
+			SwitchLog( "[SWITCH LOAD ERROR] LoadMap failed for '%ls': %ls\n", *Temp, *Error );
+#endif
+			return 0;
+		}
 		unguard;
 	}
 
@@ -2315,6 +2330,10 @@ void UGameEngine::SaveGame( INT Position )
 	appSprintf( Filename, TEXT("%s") PATH_SEPARATOR TEXT("Save%i.usa"), *GSys->SaveSlotPath, Position );
 	
 	debugf( NAME_Log, TEXT("Saving game... filename: %s"), Filename );
+#if defined(__SWITCH__)
+	SwitchLog( "[SWITCH SAVE] UGameEngine::SaveGame(%i) -> '%ls' (Level outer: '%ls')\n",
+		Position, Filename, (GLevel && GLevel->GetOuter()) ? GLevel->GetOuter()->GetName() : TEXT("None") );
+#endif
 
 	GLevel->GetLevelInfo()->LevelAction=LEVACT_Saving;
 	PaintProgress();
@@ -2327,6 +2346,10 @@ void UGameEngine::SaveGame( INT Position )
 	GLevel->CleanupDestroyed( 1 );
 	if( SavePackage( GLevel->GetOuter(), GLevel, 0, Filename, GLog ) )
 	{
+#if defined(__SWITCH__)
+		SwitchLog( "[SWITCH SAVE] SavePackage succeeded for '%ls' (HubStack=%i)!\n",
+			Filename, GLevel->GetLevelInfo()->HubStackLevel );
+#endif
 		// Copy the hub stack.
 		INT i;
 		for( i=0; i<GLevel->GetLevelInfo()->HubStackLevel; i++ )
@@ -2344,6 +2367,12 @@ void UGameEngine::SaveGame( INT Position )
 			GFileManager->Delete( Filename );
 		}
 	}
+	else
+	{
+#if defined(__SWITCH__)
+		SwitchLog( "[SWITCH SAVE ERROR] SavePackage returned false for '%ls'!\n", Filename );
+#endif
+	}
 	for( INT i=0; i<GLevel->Actors.Num(); i++ )
 		if( Cast<AMover>(GLevel->Actors(i)) )
 			Cast<AMover>(GLevel->Actors(i))->SavedPos = FVector(-1,-1,-1);
@@ -2355,6 +2384,10 @@ void UGameEngine::SaveGame( INT Position )
 	// ****
 	// Now that we are done saving our game, save all of our pa files from cache into our SaveGamePath
 	SavePersistentActorCache();
+#if defined(__SWITCH__)
+	SwitchCommitSaveData();
+	SwitchLog( "[SWITCH SAVE] SaveGame completed and committed.\n" );
+#endif
 	// ****
 
 	unguard;
