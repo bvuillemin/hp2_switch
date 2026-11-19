@@ -431,7 +431,47 @@ public:
 			SwitchCommitSaveData();
 			return 1;
 		}
-		SwitchLog("[SWITCH FILE] Move: rename failed, falling back to Copy+Delete...\n");
+		SwitchLog("[SWITCH FILE] Move: rename failed, falling back to direct stream copy+delete...\n");
+		{
+			FILE* InStream = fopen(ExistingS.c_str(), "rb");
+			FILE* OutStream = fopen(ExistingD.c_str(), "wb");
+			if( !OutStream && Exists )
+			{
+				unlink(ExistingD.c_str());
+				OutStream = fopen(ExistingD.c_str(), "wb");
+			}
+			if( InStream && OutStream )
+			{
+				char StreamBuf[65536];
+				size_t StreamRead = 0;
+				bool WriteOk = true;
+				while( (StreamRead = fread(StreamBuf, 1, sizeof(StreamBuf), InStream)) > 0 )
+				{
+					if( fwrite(StreamBuf, 1, StreamRead, OutStream) != StreamRead )
+					{
+						WriteOk = false;
+						break;
+					}
+				}
+				fclose(InStream);
+				fflush(OutStream);
+				fclose(OutStream);
+				if( WriteOk )
+				{
+					unlink(ExistingS.c_str());
+					SwitchLog("[SWITCH FILE] Move: Direct stream copy succeeded!\n");
+					SwitchCommitSaveData();
+					return 1;
+				}
+				SwitchLog("[SWITCH FILE ERROR] Direct stream copy encountered write failure!\n");
+			}
+			else
+			{
+				if( InStream ) fclose(InStream);
+				if( OutStream ) fclose(OutStream);
+				SwitchLog("[SWITCH FILE ERROR] Direct stream copy failed: In=%p, Out=%p, errno=%d\n", InStream, OutStream, errno);
+			}
+		}
 		UBOOL MoveRes = Copy(Dest,Src,Replace,EvenIfReadOnly,Attributes,NULL)&&Delete(Src,1,1);
 		SwitchLog("[SWITCH FILE] Move: Copy+Delete result = %d\n", (int)MoveRes);
 		if( MoveRes ) SwitchCommitSaveData();

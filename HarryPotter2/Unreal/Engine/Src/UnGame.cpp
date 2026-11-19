@@ -598,6 +598,7 @@ UBOOL UGameEngine::Exec( const TCHAR* Cmd, FOutputDevice& Ar )
 			debugf( NAME_Log, TEXT("Loading game slot %i (SaveSlotPath: %s)"), Slot, *GSys->SaveSlotPath );
 #if defined(__SWITCH__)
 			SwitchLog( "[SWITCH LOAD] Executing LOADGAME %i (SaveSlotPath: '%ls')...\n", Slot, *GSys->SaveSlotPath );
+			UObject::ForceResetPackageLoaders( TEXT("Save0.usa") );
 #endif
 			TCHAR LoadURL[32];
 			if( appFormatLoadGameURL(Slot,LoadURL,ARRAY_COUNT(LoadURL)) )
@@ -857,6 +858,7 @@ UBOOL UGameEngine::Browse( FURL URL, const TMap<FString,FString>* TravelInfo, FS
 		debugf( NAME_Log, TEXT("Browse: Loading savegame file %s"), *Temp );
 #if defined(__SWITCH__)
 		SwitchLog( "[SWITCH LOAD] Browse: Loading savegame file '%ls' (size=%i)...\n", *Temp, GFileManager->FileSize(*Temp) );
+		UObject::ForceResetPackageLoaders( TEXT("Save0.usa") );
 #endif
 		FURL SaveURL(*Temp);
 		SaveURL.AddOption(TEXT("load"));
@@ -2339,6 +2341,7 @@ void UGameEngine::SaveGame( INT Position )
 #if defined(__SWITCH__)
 	SwitchLog( "[SWITCH SAVE] UGameEngine::SaveGame(%i) -> '%ls' (Level outer: '%ls')\n",
 		Position, Filename, (GLevel && GLevel->GetOuter()) ? GLevel->GetOuter()->GetName() : TEXT("None") );
+	UObject::ForceResetPackageLoaders( TEXT("Save0.usa") );
 #endif
 
 	GLevel->GetLevelInfo()->LevelAction=LEVACT_Saving;

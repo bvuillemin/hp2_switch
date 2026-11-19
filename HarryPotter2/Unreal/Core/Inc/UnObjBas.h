@@ -576,6 +576,7 @@ public:
 	static void InitProperties( BYTE* Data, INT DataCount, UClass* DefaultsClass, BYTE* Defaults, INT DefaultsCount );
 	static void ExitProperties( BYTE* Data, UClass* Class );
 	static void ResetLoaders( UObject* InOuter, UBOOL DynamicOnly, UBOOL ForceLazyLoad );
+	static void ForceResetPackageLoaders( const TCHAR* PackageOrFilename );
 	static UPackage* CreatePackage( UObject* InOuter, const TCHAR* PkgName );
 	static ULinkerLoad* GetPackageLinker( UObject* InOuter, const TCHAR* Filename, DWORD LoadFlags, UPackageMap* Sandbox, FGuid* CompatibleGuid );
 	static void StaticShutdownAfterError();

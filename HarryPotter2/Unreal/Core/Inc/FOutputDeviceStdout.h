@@ -8,7 +8,7 @@
 
 #if defined(__SWITCH__)
 #include <stdio.h>
-extern "C" FILE* GSwitchLogFile;
+extern "C" void SwitchLog( const char* Fmt, ... );
 #endif
 
 //
@@ -20,15 +20,11 @@ public:
 	void Serialize( const TCHAR* V, EName Event )
 	{
 #if defined(__SWITCH__)
-		if( GSwitchLogFile )
-		{
-			char Buffer[1024];
-			if( appToUtf8InPlace( Buffer, V, ARRAY_COUNT(Buffer) ) )
-				fprintf( GSwitchLogFile, "%s\n", Buffer );
-			else
-				fprintf( GSwitchLogFile, "%ls\n", V );
-			fflush( GSwitchLogFile );
-		}
+		char Buffer[2048];
+		if( appToUtf8InPlace( Buffer, V, ARRAY_COUNT(Buffer) ) )
+			SwitchLog( "%s\n", Buffer );
+		else
+			SwitchLog( "%ls\n", V );
 #endif
 		// TCHAR is wchar_t on this platform: "%s" would print only the
 		// first character and stop at its zero byte. "%ls" converts the

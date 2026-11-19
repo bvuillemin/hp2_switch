@@ -436,6 +436,7 @@ void USDLViewport::UpdateInput( UBOOL Reset )
 					Actor->bShowMenu = 0;
 				bShowWindowsMouse = 0;
 				C->Engine->Exec( TEXT("LOADGAME 0") );
+				SwitchCommitSaveData();
 			}
 			else
 			{

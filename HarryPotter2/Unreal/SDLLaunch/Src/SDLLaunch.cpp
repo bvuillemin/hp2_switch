@@ -79,29 +79,42 @@ extern "C" int setenv(const char *name, const char *value, int overwrite);
 
 extern "C" bool GSwitchHasInternalSave = false;
 extern "C" FILE* GSwitchLogFile = NULL;
-static char GSwitchEarlyLogBuffer[32768];
+extern "C" FILE* GSwitchSaveLogFile = NULL;
+extern "C" FILE* GSwitchSaveUserLogFile = NULL;
+extern "C" FILE* GSwitchSaveRootLogFile = NULL;
+extern "C" FILE* GSwitchSdLogFile = NULL;
+static char GSwitchEarlyLogBuffer[65536];
 static size_t GSwitchEarlyLogLen = 0;
+
+extern "C" void SwitchCommitSaveData( void );
 
 extern "C" void SwitchLog( const char* Fmt, ... )
 {
 #if defined(__SWITCH__)
-	char DbgBuf[1024];
+	char DbgBuf[2048];
 	va_list DbgArgs;
 	va_start( DbgArgs, Fmt );
 	int Len = vsnprintf( DbgBuf, sizeof(DbgBuf), Fmt, DbgArgs );
 	va_end( DbgArgs );
 	svcOutputDebugString( DbgBuf, strlen(DbgBuf) );
 
-	if( GSwitchLogFile )
-	{
-		fputs( DbgBuf, GSwitchLogFile );
-		fflush( GSwitchLogFile );
-	}
-	else if( Len > 0 && GSwitchEarlyLogLen + (size_t)Len < sizeof(GSwitchEarlyLogBuffer) - 1 )
+	bool HasFile = false;
+	if( GSwitchSaveLogFile )     { fputs( DbgBuf, GSwitchSaveLogFile ); fflush( GSwitchSaveLogFile ); HasFile = true; }
+	if( GSwitchSaveUserLogFile ) { fputs( DbgBuf, GSwitchSaveUserLogFile ); fflush( GSwitchSaveUserLogFile ); HasFile = true; }
+	if( GSwitchSaveRootLogFile ) { fputs( DbgBuf, GSwitchSaveRootLogFile ); fflush( GSwitchSaveRootLogFile ); HasFile = true; }
+	if( GSwitchSdLogFile )       { fputs( DbgBuf, GSwitchSdLogFile ); fflush( GSwitchSdLogFile ); HasFile = true; }
+	if( GSwitchLogFile && !HasFile ) { fputs( DbgBuf, GSwitchLogFile ); fflush( GSwitchLogFile ); HasFile = true; }
+
+	if( !HasFile && Len > 0 && GSwitchEarlyLogLen + (size_t)Len < sizeof(GSwitchEarlyLogBuffer) - 1 )
 	{
 		memcpy( GSwitchEarlyLogBuffer + GSwitchEarlyLogLen, DbgBuf, Len );
 		GSwitchEarlyLogLen += Len;
 		GSwitchEarlyLogBuffer[GSwitchEarlyLogLen] = 0;
+	}
+
+	if( GSwitchHasInternalSave )
+	{
+		fsdevCommitDevice( "save" );
 	}
 #endif
 }
@@ -187,13 +200,19 @@ extern "C" void SwitchRestorePerformanceProfile( void )
 extern "C" void SwitchCommitSaveData( void )
 {
 #if defined(__SWITCH__)
+	if( GSwitchSaveLogFile )     fflush( GSwitchSaveLogFile );
+	if( GSwitchSaveUserLogFile ) fflush( GSwitchSaveUserLogFile );
+	if( GSwitchSaveRootLogFile ) fflush( GSwitchSaveRootLogFile );
+	if( GSwitchSdLogFile )       fflush( GSwitchSdLogFile );
+	if( GSwitchLogFile )         fflush( GSwitchLogFile );
+
 	if( GSwitchHasInternalSave )
 	{
-		if( GSwitchLogFile )
+		Result rc = fsdevCommitDevice( "save" );
+		if( R_FAILED(rc) )
 		{
-			fflush( GSwitchLogFile );
+			svcOutputDebugString( "[SWITCH SAVE ERROR] fsdevCommitDevice('save') failed!\n", 50 );
 		}
-		fsdevCommitDevice( "save" );
 	}
 #endif
 }
@@ -209,7 +228,9 @@ extern "C" void SwitchInitSaveData( void )
 		mkdir( "sdmc:/switch/hp2", 0777 );
 		mkdir( "sdmc:/switch/hp2/cache", 0777 );
 		mkdir( "sdmc:/switch/hp2/cache/mesa", 0777 );
-		GSwitchLogFile = fopen( "sdmc:/switch/hp2/boot.log", "w" );
+		GSwitchSdLogFile = fopen( "sdmc:/switch/hp2/boot.log", "w" );
+		FILE* RootSd = fopen( "sdmc:/hp2_boot.log", "w" );
+		GSwitchLogFile = GSwitchSdLogFile ? GSwitchSdLogFile : RootSd;
 		if( GSwitchLogFile )
 		{
 			setvbuf( GSwitchLogFile, NULL, _IONBF, 0 );
@@ -227,6 +248,22 @@ extern "C" void SwitchInitSaveData( void )
 	SwitchLog( "[SWITCH SAVE] Running as NSO (Standalone NSP): mounting internal save...\n" );
 	Result r_rc = romfsInit();
 	SwitchLog( "[SWITCH ROMFS] romfsInit returned 0x%x\n", (unsigned)r_rc );
+
+	// Also attempt to open fail-safe SD root log so user can inspect log directly from SD card
+	if( !GSwitchSdLogFile )
+	{
+		GSwitchSdLogFile = fopen( "sdmc:/hp2_boot.log", "w" );
+		if( GSwitchSdLogFile )
+		{
+			setvbuf( GSwitchSdLogFile, NULL, _IONBF, 0 );
+			if( GSwitchEarlyLogLen > 0 )
+			{
+				fwrite( GSwitchEarlyLogBuffer, 1, GSwitchEarlyLogLen, GSwitchSdLogFile );
+			}
+			fputs( "[SWITCH LOG] Direct SD log opened at 'sdmc:/hp2_boot.log'\n", GSwitchSdLogFile );
+			fflush( GSwitchSdLogFile );
+		}
+	}
 
 	AccountUid uid = {0};
 	if( R_SUCCEEDED(accountInitialize(AccountServiceType_Application)) )
@@ -301,19 +338,22 @@ extern "C" void SwitchInitSaveData( void )
 		mkdir( "save:/User/Cache", 0777 );
 		mkdir( "save:/User/Cache/mesa", 0777 );
 
-		GSwitchLogFile = fopen( "save:/boot.log", "w" );
-		if( GSwitchLogFile )
+		// Open log files in user saves directory, user root, and save partition root
+		GSwitchSaveLogFile     = fopen( "save:/User/Save/boot.log", "w" );
+		GSwitchSaveUserLogFile = fopen( "save:/User/boot.log", "w" );
+		GSwitchSaveRootLogFile = fopen( "save:/boot.log", "w" );
+		GSwitchLogFile = GSwitchSaveLogFile ? GSwitchSaveLogFile : GSwitchSaveRootLogFile;
+
+		if( GSwitchEarlyLogLen > 0 )
 		{
-			setvbuf( GSwitchLogFile, NULL, _IONBF, 0 );
-			if( GSwitchEarlyLogLen > 0 )
-			{
-				fwrite( GSwitchEarlyLogBuffer, 1, GSwitchEarlyLogLen, GSwitchLogFile );
-				GSwitchEarlyLogLen = 0;
-			}
-			fputs( "[SWITCH LOG] Logging successfully initialized to 'save:/boot.log'\n", GSwitchLogFile );
-			fflush( GSwitchLogFile );
+			if( GSwitchSaveLogFile )     fwrite( GSwitchEarlyLogBuffer, 1, GSwitchEarlyLogLen, GSwitchSaveLogFile );
+			if( GSwitchSaveUserLogFile ) fwrite( GSwitchEarlyLogBuffer, 1, GSwitchEarlyLogLen, GSwitchSaveUserLogFile );
+			if( GSwitchSaveRootLogFile ) fwrite( GSwitchEarlyLogBuffer, 1, GSwitchEarlyLogLen, GSwitchSaveRootLogFile );
+			GSwitchEarlyLogLen = 0;
 		}
-		fsdevCommitDevice( "save" );
+
+		SwitchLog( "[SWITCH LOG] Logging initialized to 'save:/User/Save/boot.log', 'save:/User/boot.log', 'save:/boot.log', 'sdmc:/hp2_boot.log'\n" );
+		SwitchCommitSaveData();
 	}
 	else
 	{
@@ -340,6 +380,10 @@ static FSwitchEarlyMalloc GSwitchEarlyMalloc;
 extern "C" void userAppInit( void )
 {
 	GMalloc = &GSwitchEarlyMalloc;
+	// Early open of SD log if SDMC is available
+	GSwitchSdLogFile = fopen( "sdmc:/hp2_boot.log", "w" );
+	if( GSwitchSdLogFile )
+		setvbuf( GSwitchSdLogFile, NULL, _IONBF, 0 );
 	SwitchLog( "=== Harry Potter 2 Nintendo Switch Boot Log ===\n" );
 	SwitchLog( "[SWITCH STAGE 1] userAppInit: libnx services and SDMC initialized, early GMalloc active.\n" );
 }
@@ -347,13 +391,12 @@ extern "C" void userAppInit( void )
 extern "C" void userAppExit( void )
 {
 	SwitchLog( "[SWITCH STAGE X] userAppExit called.\n" );
-	if( GSwitchLogFile )
-	{
-		fflush( GSwitchLogFile );
-		fclose( GSwitchLogFile );
-		GSwitchLogFile = NULL;
-	}
 	SwitchCommitSaveData();
+	if( GSwitchSaveLogFile )     { fclose( GSwitchSaveLogFile );     GSwitchSaveLogFile = NULL; }
+	if( GSwitchSaveUserLogFile ) { fclose( GSwitchSaveUserLogFile ); GSwitchSaveUserLogFile = NULL; }
+	if( GSwitchSaveRootLogFile ) { fclose( GSwitchSaveRootLogFile ); GSwitchSaveRootLogFile = NULL; }
+	if( GSwitchSdLogFile )       { fclose( GSwitchSdLogFile );       GSwitchSdLogFile = NULL; }
+	GSwitchLogFile = NULL;
 }
 
 extern "C" {
@@ -6662,6 +6705,9 @@ static int RealMain( int ArgC, char* ArgV[] )
 int main( int ArgC, char* ArgV[] )
 #endif
 {
+#if defined(__SWITCH__)
+	GLogHook = &StdoutEcho;
+#endif
 
 	// Install the real process allocator before anything else can touch
 	// engine containers: every FString/TArray allocation routes through

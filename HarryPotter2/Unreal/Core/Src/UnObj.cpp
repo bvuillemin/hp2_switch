@@ -2697,6 +2697,34 @@ void UObject::ResetLoaders( UObject* Pkg, UBOOL DynamicOnly, UBOOL ForceLazyLoad
 	unguard;
 }
 
+void UObject::ForceResetPackageLoaders( const TCHAR* PackageOrFilename )
+{
+	guard(UObject::ForceResetPackageLoaders);
+	for( INT i=GObjLoaders.Num()-1; i>=0; i-- )
+	{
+		ULinkerLoad* Linker = CastChecked<ULinkerLoad>( GetLoader(i) );
+		if( !Linker ) continue;
+		bool Match = false;
+		if( !PackageOrFilename || !*PackageOrFilename ) Match = true;
+		else
+		{
+			if( Linker->LinkerRoot && appStricmp(Linker->LinkerRoot->GetName(), PackageOrFilename) == 0 ) Match = true;
+			if( appStricmp(*Linker->Filename, PackageOrFilename) == 0 ) Match = true;
+			if( appStrstr(*Linker->Filename, PackageOrFilename) != NULL ) Match = true;
+		}
+		if( Match )
+		{
+#if defined(__SWITCH__)
+			SwitchLog( "[SWITCH LOADER] ForceResetPackageLoaders: Closing loader for '%ls' (Root='%ls')\n",
+				*Linker->Filename, Linker->LinkerRoot ? Linker->LinkerRoot->GetName() : TEXT("None") );
+#endif
+			Linker->DetachAllLazyLoaders( 1 );
+			delete Linker;
+		}
+	}
+	unguard;
+}
+
 /*-----------------------------------------------------------------------------
 	File saving.
 -----------------------------------------------------------------------------*/
@@ -2847,6 +2875,28 @@ UBOOL UObject::SavePackage( UObject* InOuter, UObject* Base, DWORD TopLevelFlags
 #if defined(__SWITCH__)
 	SwitchLog( "[SWITCH SAVE] SavePackage: InOuter='%ls', Filename='%ls', TempFilename='%ls'\n",
 		InOuter ? InOuter->GetName() : TEXT("None"), Filename, TempFilename );
+
+	// On Switch, any open file handle prevents unlinking and renaming with EBUSY (0x2EE602).
+	// Forcefully detach and delete ANY loader in GObjLoaders that matches Filename, TempFilename, or InOuter.
+	for( INT i=GObjLoaders.Num()-1; i>=0; i-- )
+	{
+		ULinkerLoad* L = CastChecked<ULinkerLoad>( GetLoader(i) );
+		if( !L ) continue;
+		bool Match = false;
+		if( L->LinkerRoot == InOuter ) Match = true;
+		if( L->LinkerRoot && appStricmp(L->LinkerRoot->GetName(), TEXT("Save0")) == 0 ) Match = true;
+		if( appStricmp(*L->Filename, Filename) == 0 ) Match = true;
+		if( appStricmp(*L->Filename, TempFilename) == 0 ) Match = true;
+		if( appStrstr(*L->Filename, TEXT("Save0.usa")) != NULL ) Match = true;
+		if( appStrstr(*L->Filename, TEXT("Save.tmp")) != NULL ) Match = true;
+		if( Match )
+		{
+			SwitchLog( "[SWITCH SAVE pre] Closing loader for '%ls' (Root='%ls')\n",
+				*L->Filename, L->LinkerRoot ? L->LinkerRoot->GetName() : TEXT("None") );
+			L->DetachAllLazyLoaders( 1 );
+			delete L;
+		}
+	}
 #endif
 
 	// If we have a loader for the package, unload it to prevent conflicts.
@@ -3156,6 +3206,28 @@ UBOOL UObject::SavePackage( UObject* InOuter, UObject* Base, DWORD TopLevelFlags
 	debugf( NAME_Log, TEXT("Save=%f"), GSecondsPerCycle*1000*Time );
 	if( Success )
 	{
+#if defined(__SWITCH__)
+		// Forcefully close ANY loader in GObjLoaders that matches Filename, TempFilename, or InOuter before Move
+		for( INT i=GObjLoaders.Num()-1; i>=0; i-- )
+		{
+			ULinkerLoad* L = CastChecked<ULinkerLoad>( GetLoader(i) );
+			if( !L ) continue;
+			bool Match = false;
+			if( L->LinkerRoot == InOuter ) Match = true;
+			if( L->LinkerRoot && appStricmp(L->LinkerRoot->GetName(), TEXT("Save0")) == 0 ) Match = true;
+			if( appStricmp(*L->Filename, Filename) == 0 ) Match = true;
+			if( appStricmp(*L->Filename, TempFilename) == 0 ) Match = true;
+			if( appStrstr(*L->Filename, TEXT("Save0.usa")) != NULL ) Match = true;
+			if( appStrstr(*L->Filename, TEXT("Save.tmp")) != NULL ) Match = true;
+			if( Match )
+			{
+				SwitchLog( "[SWITCH SAVE pre-move] Closing loader for '%ls' (Root='%ls')\n",
+					*L->Filename, L->LinkerRoot ? L->LinkerRoot->GetName() : TEXT("None") );
+				L->DetachAllLazyLoaders( 1 );
+				delete L;
+			}
+		}
+#endif
 		// Move the temporary file.
 		debugf( NAME_Log, TEXT("Moving '%s' to '%s'"), TempFilename, Filename );
 #if defined(__SWITCH__)
