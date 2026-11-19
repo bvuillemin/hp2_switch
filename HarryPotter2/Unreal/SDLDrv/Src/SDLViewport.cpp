@@ -439,7 +439,8 @@ void USDLViewport::UpdateInput( UBOOL Reset )
 			}
 			else
 			{
-				SwitchLog( "[SWITCH INPUT] L + R + Plus + Minus pressed, but Save0 was not found on SD card.\n" );
+				SwitchLog( "[SWITCH INPUT] L + R + Plus + Minus pressed, but cannot load (HasSave0=%d, C=%p, Engine=%p)\n",
+					(int)HasSave0, C, (C ? C->Engine : nullptr) );
 			}
 		}
 		return;

@@ -2844,6 +2844,11 @@ UBOOL UObject::SavePackage( UObject* InOuter, UObject* Base, DWORD TopLevelFlags
 	GWarn->StatusUpdatef( 0, 0, LocalizeProgress("Saving"), Filename );
 	UBOOL Success = 0;
 
+#if defined(__SWITCH__)
+	SwitchLog( "[SWITCH SAVE] SavePackage: InOuter='%ls', Filename='%ls', TempFilename='%ls'\n",
+		InOuter ? InOuter->GetName() : TEXT("None"), Filename, TempFilename );
+#endif
+
 	// If we have a loader for the package, unload it to prevent conflicts.
 	ResetLoaders( InOuter, 0, 1 );
 
@@ -3153,21 +3158,45 @@ UBOOL UObject::SavePackage( UObject* InOuter, UObject* Base, DWORD TopLevelFlags
 	{
 		// Move the temporary file.
 		debugf( NAME_Log, TEXT("Moving '%s' to '%s'"), TempFilename, Filename );
+#if defined(__SWITCH__)
+		SwitchLog( "[SWITCH SAVE] Moving temp save '%ls' to '%ls'...\n", TempFilename, Filename );
+#endif
 		if( !GFileManager->Move( Filename, TempFilename ) )
 		{
+#if defined(__SWITCH__)
+			SwitchLog( "[SWITCH SAVE] Move failed, attempting Delete and second Move/Copy fallback...\n" );
+#endif
 			GFileManager->Delete( Filename, 0, 1 );
 			if( GFileManager->Move( Filename, TempFilename ) ||
 			    (GFileManager->Copy( Filename, TempFilename, 1, 1, 0, NULL ) && GFileManager->Delete( TempFilename, 1, 1 )) )
 			{
 				debugf( NAME_Log, TEXT("Moved '%s' to '%s' via fallback"), TempFilename, Filename );
+#if defined(__SWITCH__)
+				SwitchLog( "[SWITCH SAVE] Moved '%ls' to '%ls' via fallback!\n", TempFilename, Filename );
+#endif
 			}
 			else
 			{
 				GFileManager->Delete( TempFilename );
 				GWarn->Logf( LocalizeError("SaveWarning"), Filename );
 				Success = 0;
+#if defined(__SWITCH__)
+				SwitchLog( "[SWITCH SAVE ERROR] Fallback also failed! SavePackage failed for '%ls'!\n", Filename );
+#endif
 			}
 		}
+		else
+		{
+#if defined(__SWITCH__)
+			SwitchLog( "[SWITCH SAVE] Move succeeded for '%ls'!\n", Filename );
+#endif
+		}
+	}
+	else
+	{
+#if defined(__SWITCH__)
+		SwitchLog( "[SWITCH SAVE ERROR] SavePackage: Success is 0 before Move for '%ls'!\n", Filename );
+#endif
 	}
 	return Success;
 	unguard;

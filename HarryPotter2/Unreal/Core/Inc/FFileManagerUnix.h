@@ -225,6 +225,7 @@ private:
 
 #if defined(__SWITCH__)
 extern "C" void SwitchCommitSaveData( void );
+extern "C" void SwitchLog( const char* Fmt, ... );
 #endif
 
 class FArchiveFileWriterUnix : public FArchive
@@ -344,6 +345,10 @@ public:
 		}
 		const char* Mode=(Flags&FILEWRITE_Append) ? "ab" : "wb";
 		FILE* File=fopen(WritePath.c_str(),Mode);
+#if defined(__SWITCH__)
+		if( !File )
+			SwitchLog("[SWITCH FILE ERROR] CreateFileWriter: fopen('%s', '%s') failed! errno=%d\n", WritePath.c_str(), Mode, errno);
+#endif
 		if( !File ) return WriterFailure(Filename,Flags,Error,TEXT("Failed to open file for writing"));
 		if( Flags&FILEWRITE_Unbuffered ) setvbuf(File,NULL,_IONBF,0);
 		off_t Pos=0;
@@ -369,9 +374,19 @@ public:
 	{
 		if( Progress ) Progress(0.f);
 		FArchive* Src=CreateFileReader(SrcFile,0,GNull);
-		if( !Src ) { if(Progress) Progress(1.f); return 0; }
+		if( !Src ) {
+#if defined(__SWITCH__)
+			SwitchLog("[SWITCH FILE ERROR] Copy: Failed to open Src '%ls'!\n", SrcFile);
+#endif
+			if(Progress) Progress(1.f); return 0;
+		}
 		FArchive* Dest=CreateFileWriter(DestFile,(ReplaceExisting?0:FILEWRITE_NoReplaceExisting)|(EvenIfReadOnly?FILEWRITE_EvenIfReadOnly:0),GNull);
-		if( !Dest ) { Src->Close(); delete Src; if(Progress) Progress(1.f); return 0; }
+		if( !Dest ) {
+#if defined(__SWITCH__)
+			SwitchLog("[SWITCH FILE ERROR] Copy: Failed to open Dest '%ls'!\n", DestFile);
+#endif
+			Src->Close(); delete Src; if(Progress) Progress(1.f); return 0;
+		}
 		INT Size=Src->TotalSize(), Total=0; std::vector<BYTE> Buffer(64*1024);
 		while( Total<Size && !Src->IsError() && !Dest->IsError() )
 		{
@@ -386,6 +401,10 @@ public:
 		delete Dest; delete Src;
 		if( !Success ) Delete(DestFile,0,1); else if(Attributes) Success=CopyAttributes(DestFile,SrcFile);
 		if( Progress ) Progress(1.f);
+#if defined(__SWITCH__)
+		SwitchLog("[SWITCH FILE] Copy('%ls' -> '%ls') = %d (Size=%d, Total=%d)\n", SrcFile, DestFile, (int)Success, Size, Total);
+		if( Success ) SwitchCommitSaveData();
+#endif
 		return Success;
 	}
 	UBOOL Move( const TCHAR* Dest, const TCHAR* Src, UBOOL Replace=1, UBOOL EvenIfReadOnly=0, UBOOL Attributes=0 )
@@ -398,21 +417,32 @@ public:
 		if( Ambiguous || (!Replace&&Exists) ) return 0;
 		if( EvenIfReadOnly&&Exists ) MakeWritable(ExistingD);
 		if( !Exists && (!RecoverPath(D,1,ExistingD,Ambiguous)||Ambiguous) ) return 0;
+#if defined(__SWITCH__)
+		SwitchLog("[SWITCH FILE] Move: Src='%s', Dest='%s', Replace=%d, Exists=%d\n", ExistingS.c_str(), ExistingD.c_str(), (int)Replace, (int)Exists);
+		if( Replace && Exists )
+		{
+			int un_rc = unlink(ExistingD.c_str());
+			SwitchLog("[SWITCH FILE] Move: unlink('%s') = %d (errno=%d)\n", ExistingD.c_str(), un_rc, errno);
+		}
+		int ren_rc = rename(ExistingS.c_str(), ExistingD.c_str());
+		SwitchLog("[SWITCH FILE] Move: rename('%s', '%s') = %d (errno=%d)\n", ExistingS.c_str(), ExistingD.c_str(), ren_rc, errno);
+		if( ren_rc == 0 )
+		{
+			SwitchCommitSaveData();
+			return 1;
+		}
+		SwitchLog("[SWITCH FILE] Move: rename failed, falling back to Copy+Delete...\n");
+		UBOOL MoveRes = Copy(Dest,Src,Replace,EvenIfReadOnly,Attributes,NULL)&&Delete(Src,1,1);
+		SwitchLog("[SWITCH FILE] Move: Copy+Delete result = %d\n", (int)MoveRes);
+		if( MoveRes ) SwitchCommitSaveData();
+		return MoveRes;
+#else
 		if( Replace && Exists )
 			unlink(ExistingD.c_str());
 		if( rename(ExistingS.c_str(),ExistingD.c_str())==0 )
-		{
-#if defined(__SWITCH__)
-			SwitchCommitSaveData();
-#endif
 			return 1;
-		}
-		UBOOL MoveRes = Copy(Dest,Src,Replace,EvenIfReadOnly,Attributes,NULL)&&Delete(Src,1,1);
-#if defined(__SWITCH__)
-		if( MoveRes ) SwitchCommitSaveData();
+		return Copy(Dest,Src,Replace,EvenIfReadOnly,Attributes,NULL)&&Delete(Src,1,1);
 #endif
-		return MoveRes;
-		return 0;
 	}
 	UBOOL Delete( const TCHAR* Filename, UBOOL RequireExists=0, UBOOL EvenReadOnly=0 )
 	{
@@ -422,6 +452,7 @@ public:
 		if( unlink(Path.c_str())==0 )
 		{
 #if defined(__SWITCH__)
+			SwitchLog("[SWITCH FILE] Delete: unlink('%s') succeeded\n", Path.c_str());
 			SwitchCommitSaveData();
 #endif
 			return 1;
@@ -430,7 +461,12 @@ public:
 		std::string Recovered; UBOOL Ambiguous=0;
 		if( !RecoverPath(Path,0,Recovered,Ambiguous) ) return !RequireExists&&!Ambiguous;
 		if( EvenReadOnly ) MakeWritable(Recovered);
-		return unlink(Recovered.c_str())==0 || (!RequireExists&&errno==ENOENT);
+		int un_rc = unlink(Recovered.c_str());
+#if defined(__SWITCH__)
+		SwitchLog("[SWITCH FILE] Delete: recovered unlink('%s') = %d (errno=%d)\n", Recovered.c_str(), un_rc, errno);
+		if( un_rc == 0 ) SwitchCommitSaveData();
+#endif
+		return un_rc==0 || (!RequireExists&&errno==ENOENT);
 	}
 	SQWORD GetGlobalTime( const TCHAR* Filename )
 	{

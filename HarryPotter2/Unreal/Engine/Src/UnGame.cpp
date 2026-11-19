@@ -2109,8 +2109,11 @@ void UGameEngine::Tick( FLOAT DeltaSeconds )
 	// HP2 specific - Handle player saving
 	guard(PlayerSaving);
 	APlayerPawn* Player = Client->Viewports(0)->Actor;
-	if( Client && Client->Viewports.Num() && Player->bQueuedToSaveGame )
+	if( Client && Client->Viewports.Num() && Player && Player->bQueuedToSaveGame )
 	{
+#if defined(__SWITCH__)
+		SwitchLog( "[SWITCH TICK] Player->bQueuedToSaveGame detected! Triggering SaveGame(0)...\n" );
+#endif
 		// We are queued to save the game...
 	
 		// Make sure we have a path to save to
@@ -2321,6 +2324,9 @@ void UGameEngine::SaveGame( INT Position )
 	if( GLevel && GLevel->GetOuter() && (appStricmp(GLevel->GetOuter()->GetName(), TEXT("Startup")) == 0 || appStricmp(GLevel->GetOuter()->GetName(), TEXT("Entry")) == 0) )
 	{
 		debugf( NAME_Log, TEXT("Refusing to save system/movie level %s"), GLevel->GetOuter()->GetName() );
+#if defined(__SWITCH__)
+		SwitchLog( "[SWITCH SAVE] Refusing to save system/movie level '%ls'!\n", GLevel->GetOuter()->GetName() );
+#endif
 		return;
 	}
 

@@ -79,6 +79,8 @@ extern "C" int setenv(const char *name, const char *value, int overwrite);
 
 extern "C" bool GSwitchHasInternalSave = false;
 extern "C" FILE* GSwitchLogFile = NULL;
+static char GSwitchEarlyLogBuffer[32768];
+static size_t GSwitchEarlyLogLen = 0;
 
 extern "C" void SwitchLog( const char* Fmt, ... )
 {
@@ -86,9 +88,21 @@ extern "C" void SwitchLog( const char* Fmt, ... )
 	char DbgBuf[1024];
 	va_list DbgArgs;
 	va_start( DbgArgs, Fmt );
-	vsnprintf( DbgBuf, sizeof(DbgBuf), Fmt, DbgArgs );
+	int Len = vsnprintf( DbgBuf, sizeof(DbgBuf), Fmt, DbgArgs );
 	va_end( DbgArgs );
 	svcOutputDebugString( DbgBuf, strlen(DbgBuf) );
+
+	if( GSwitchLogFile )
+	{
+		fputs( DbgBuf, GSwitchLogFile );
+		fflush( GSwitchLogFile );
+	}
+	else if( Len > 0 && GSwitchEarlyLogLen + (size_t)Len < sizeof(GSwitchEarlyLogBuffer) - 1 )
+	{
+		memcpy( GSwitchEarlyLogBuffer + GSwitchEarlyLogLen, DbgBuf, Len );
+		GSwitchEarlyLogLen += Len;
+		GSwitchEarlyLogBuffer[GSwitchEarlyLogLen] = 0;
+	}
 #endif
 }
 
@@ -175,6 +189,10 @@ extern "C" void SwitchCommitSaveData( void )
 #if defined(__SWITCH__)
 	if( GSwitchHasInternalSave )
 	{
+		if( GSwitchLogFile )
+		{
+			fflush( GSwitchLogFile );
+		}
 		fsdevCommitDevice( "save" );
 	}
 #endif
@@ -187,6 +205,22 @@ extern "C" void SwitchInitSaveData( void )
 	{
 		SwitchLog( "[SWITCH SAVE] Running as NRO: using SD card storage ('sdmc:/switch/hp2')\n" );
 		GSwitchHasInternalSave = false;
+		mkdir( "sdmc:/switch", 0777 );
+		mkdir( "sdmc:/switch/hp2", 0777 );
+		mkdir( "sdmc:/switch/hp2/cache", 0777 );
+		mkdir( "sdmc:/switch/hp2/cache/mesa", 0777 );
+		GSwitchLogFile = fopen( "sdmc:/switch/hp2/boot.log", "w" );
+		if( GSwitchLogFile )
+		{
+			setvbuf( GSwitchLogFile, NULL, _IONBF, 0 );
+			if( GSwitchEarlyLogLen > 0 )
+			{
+				fwrite( GSwitchEarlyLogBuffer, 1, GSwitchEarlyLogLen, GSwitchLogFile );
+				GSwitchEarlyLogLen = 0;
+			}
+			fputs( "[SWITCH LOG] Logging initialized to 'sdmc:/switch/hp2/boot.log'\n", GSwitchLogFile );
+			fflush( GSwitchLogFile );
+		}
 		return;
 	}
 
@@ -265,6 +299,20 @@ extern "C" void SwitchInitSaveData( void )
 		mkdir( "save:/User/Save/Slot0", 0777 );
 		mkdir( "save:/User/Save/cache", 0777 );
 		mkdir( "save:/User/Cache", 0777 );
+		mkdir( "save:/User/Cache/mesa", 0777 );
+
+		GSwitchLogFile = fopen( "save:/boot.log", "w" );
+		if( GSwitchLogFile )
+		{
+			setvbuf( GSwitchLogFile, NULL, _IONBF, 0 );
+			if( GSwitchEarlyLogLen > 0 )
+			{
+				fwrite( GSwitchEarlyLogBuffer, 1, GSwitchEarlyLogLen, GSwitchLogFile );
+				GSwitchEarlyLogLen = 0;
+			}
+			fputs( "[SWITCH LOG] Logging successfully initialized to 'save:/boot.log'\n", GSwitchLogFile );
+			fflush( GSwitchLogFile );
+		}
 		fsdevCommitDevice( "save" );
 	}
 	else
@@ -301,9 +349,11 @@ extern "C" void userAppExit( void )
 	SwitchLog( "[SWITCH STAGE X] userAppExit called.\n" );
 	if( GSwitchLogFile )
 	{
+		fflush( GSwitchLogFile );
 		fclose( GSwitchLogFile );
 		GSwitchLogFile = NULL;
 	}
+	SwitchCommitSaveData();
 }
 
 extern "C" {
@@ -6308,10 +6358,7 @@ static int HP2BootAfterLauncher(
 		}
 
 #if defined(__SWITCH__)
-		if( ParseParam( appCmdLine(), TEXT("LOG") ) )
-			GLogHook = &StdoutEcho;
-		else
-			GLogHook = NULL;
+		GLogHook = &StdoutEcho;
 #else
 		if( ParseParam( appCmdLine(), TEXT("LOG") ) )
 			GLogHook = &StdoutEcho;
