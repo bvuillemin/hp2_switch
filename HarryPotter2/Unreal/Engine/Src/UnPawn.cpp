@@ -292,6 +292,67 @@ UBOOL APlayerPawn::BeginModernThirdPersonInput
 	unguard;
 }
 
+static FLOAT GCameraTransitionTimer = 0.0f;
+static FLOAT GCelebrateFallbackTimer = 0.0f;
+
+static void RecoverCameraTransition( APlayerPawn* PlayerPawn, FLOAT DeltaSeconds )
+{
+	if( !PlayerPawn || !PlayerPawn->ViewTarget )
+	{
+		GCameraTransitionTimer = 0.0f;
+		GCelebrateFallbackTimer = 0.0f;
+		return;
+	}
+
+	AActor* Camera = PlayerPawn->ViewTarget;
+	const UBOOL bInTransition = IsInScriptState(Camera, TEXT("StateTransition"));
+	const UBOOL bInCelebrate = IsInScriptState(PlayerPawn, TEXT("CelebrateBronzeCardSet")) ||
+	                           IsInScriptState(PlayerPawn, TEXT("CelebrateCardSet"));
+
+	if( bInTransition )
+	{
+		GCameraTransitionTimer += DeltaSeconds;
+		// BaseCam in StateTransition smoothly moves toward standard position.
+		// If it has interpolated for >= 0.5s or is stuck at the 0.01 threshold, complete the transition.
+		if( GCameraTransitionTimer >= 0.5f )
+		{
+			UFunction* SetCamModeFunc = Camera->FindFunction(FName(TEXT("SetCameraMode")));
+			if( SetCamModeFunc )
+			{
+				BYTE StandardMode = 3; // CM_Standard
+				Camera->ProcessEvent(SetCamModeFunc, &StandardMode);
+			}
+			GCameraTransitionTimer = 0.0f;
+		}
+	}
+	else
+	{
+		GCameraTransitionTimer = 0.0f;
+	}
+
+	if( bInCelebrate )
+	{
+		GCelebrateFallbackTimer += DeltaSeconds;
+		// Full Celebrate animation + sound + stamina increment takes ~3.5s.
+		// After 4.5s, if Harry is still in celebration state, guarantee return to walking.
+		if( GCelebrateFallbackTimer >= 4.5f )
+		{
+			UFunction* SetCamModeFunc = Camera->FindFunction(FName(TEXT("SetCameraMode")));
+			if( SetCamModeFunc )
+			{
+				BYTE StandardMode = 3; // CM_Standard
+				Camera->ProcessEvent(SetCamModeFunc, &StandardMode);
+			}
+			PlayerPawn->GotoState(FName(TEXT("PlayerWalking")));
+			GCelebrateFallbackTimer = 0.0f;
+		}
+	}
+	else
+	{
+		GCelebrateFallbackTimer = 0.0f;
+	}
+}
+
 void APlayerPawn::FinishModernThirdPersonInput
 (
 	UBOOL Active,
@@ -303,6 +364,8 @@ void APlayerPawn::FinishModernThirdPersonInput
 )
 {
 	guard(APlayerPawn::FinishModernThirdPersonInput);
+
+	RecoverCameraTransition( this, DeltaSeconds );
 
 	if( !Active || !bModernThirdPersonControls )
 		return;
