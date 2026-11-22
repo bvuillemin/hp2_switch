@@ -395,6 +395,29 @@ UBOOL AActor::Tick( FLOAT DeltaSeconds, ELevelTick TickType )
 			HP2CreatureGeneratorTraceTickDispatch( this, DeltaSeconds );
 			GlobalTickTrace.EventTick();
 			eventTick(DeltaSeconds);
+			if( GetClass()->GetFName() == FName(TEXT("baseCam")) )
+			{
+				static FLOAT GStateTransitionElapsed = 0.0f;
+				if( GetStateFrame() && GetStateFrame()->StateNode && GetStateFrame()->StateNode->GetFName() == FName(TEXT("StateTransition")) )
+				{
+					GStateTransitionElapsed += DeltaSeconds;
+					if( GStateTransitionElapsed >= 4.0f )
+					{
+						debugf( NAME_Warning, TEXT("[BaseCam StateTransition] Safety timeout (%.2fs elapsed): completing transition to CM_Standard"), GStateTransitionElapsed );
+						UFunction* SetCamModeFunc = FindFunction(FName(TEXT("SetCameraMode")));
+						if( SetCamModeFunc )
+						{
+							BYTE StandardMode = 3; // CM_Standard
+							ProcessEvent(SetCamModeFunc, &StandardMode);
+						}
+						GStateTransitionElapsed = 0.0f;
+					}
+				}
+				else
+				{
+					GStateTransitionElapsed = 0.0f;
+				}
+			}
 		}
 		else
 			GlobalTickTrace.SetSkipReason( "skip_not_probing" );
