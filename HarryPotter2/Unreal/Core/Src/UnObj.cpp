@@ -3236,11 +3236,16 @@ UBOOL UObject::SavePackage( UObject* InOuter, UObject* Base, DWORD TopLevelFlags
 		if( !GFileManager->Move( Filename, TempFilename ) )
 		{
 #if defined(__SWITCH__)
-			SwitchLog( "[SWITCH SAVE] Move failed, attempting Delete and second Move/Copy fallback...\n" );
-#endif
+			// The Switch Move already falls back to a stream copy and
+			// restores the previous file on failure; deleting it here would
+			// throw away the last good savegame.
+			SwitchLog( "[SWITCH SAVE] Move failed; previous save kept.\n" );
+			if( 0 )
+#else
 			GFileManager->Delete( Filename, 0, 1 );
 			if( GFileManager->Move( Filename, TempFilename ) ||
 			    (GFileManager->Copy( Filename, TempFilename, 1, 1, 0, NULL ) && GFileManager->Delete( TempFilename, 1, 1 )) )
+#endif
 			{
 				debugf( NAME_Log, TEXT("Moved '%s' to '%s' via fallback"), TempFilename, Filename );
 #if defined(__SWITCH__)

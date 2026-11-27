@@ -880,6 +880,7 @@ UBOOL UGameEngine::Browse( FURL URL, const TMap<FString,FString>* TravelInfo, FS
 		{
 #if defined(__SWITCH__)
 			SwitchLog( "[SWITCH LOAD] LoadMap succeeded for '%ls'!\n", *Temp );
+			SwitchAutoLoadSucceeded();
 #endif
 			// Copy the hub stack.
 			INT i;

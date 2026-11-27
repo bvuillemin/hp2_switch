@@ -33,6 +33,15 @@
 #ifndef lstat
 #define lstat stat
 #endif
+#include <time.h>
+#include <cstdlib>
+
+extern "C" void SwitchLog( const char* Fmt, ... );
+extern "C" int SwitchLogEnabled( void );
+// Process-wide read totals for the debug log (defined in SDLLaunch.cpp).
+extern "C" long long GSwitchReadNs, GSwitchReadBytes, GSwitchReadCalls;
+// Bytes currently held by all readers' block caches (defined in SDLLaunch.cpp).
+extern "C" long long GSwitchReadCacheBytes;
 #endif
 
 namespace
@@ -225,14 +234,15 @@ private:
 
 #if defined(__SWITCH__)
 extern "C" void SwitchCommitSaveData( void );
+extern "C" void SwitchCommitSaveDataForPath( const char* Path );
 extern "C" void SwitchLog( const char* Fmt, ... );
 #endif
 
 class FArchiveFileWriterUnix : public FArchive
 {
 public:
-	FArchiveFileWriterUnix( FILE* InFile, FOutputDevice* InError, off_t InPos )
-	: File(InFile), Error(InError ? InError : GNull), Pos(InPos)
+	FArchiveFileWriterUnix( FILE* InFile, FOutputDevice* InError, off_t InPos, UBOOL InCommitOnClose=0 )
+	: File(InFile), Error(InError ? InError : GNull), Pos(InPos), CommitOnClose(InCommitOnClose)
 	{
 		ArIsSaving = ArIsPersistent = 1;
 	}
@@ -258,7 +268,10 @@ public:
 			if( fclose(File) != 0 ) Fail(TEXT("POSIX file-writer close failed"));
 			File = NULL;
 #if defined(__SWITCH__)
-			SwitchCommitSaveData();
+			// Only a complete file on the save device is worth a commit: a
+			// failed write must not make a truncated file durable.
+			if( CommitOnClose && !ArIsError )
+				SwitchCommitSaveData();
 #endif
 		}
 		return !ArIsError;
@@ -298,6 +311,7 @@ private:
 	FILE* File;
 	FOutputDevice* Error;
 	off_t Pos;
+	UBOOL CommitOnClose;
 };
 
 class FFileManagerUnix : public FFileManagerGeneric
@@ -357,7 +371,12 @@ public:
 			if( fseeko(File,0,SEEK_END) != 0 || (Pos=ftello(File)) < 0 || Pos > (off_t)MAXINT )
 				{ fclose(File); return WriterFailure(Filename,Flags,Error,TEXT("Append position exceeds archive INT contract")); }
 		}
-		return new(TEXT("UnixFileWriter")) FArchiveFileWriterUnix(File,Error,Pos);
+#if defined(__SWITCH__)
+		const UBOOL OnSaveDevice = WritePath.compare(0,5,"save:")==0;
+#else
+		const UBOOL OnSaveDevice = 0;
+#endif
+		return new(TEXT("UnixFileWriter")) FArchiveFileWriterUnix(File,Error,Pos,OnSaveDevice);
 	}
 	INT FileSize( const TCHAR* Filename )
 	{
@@ -403,7 +422,10 @@ public:
 		if( Progress ) Progress(1.f);
 #if defined(__SWITCH__)
 		SwitchLog("[SWITCH FILE] Copy('%ls' -> '%ls') = %d (Size=%d, Total=%d)\n", SrcFile, DestFile, (int)Success, Size, Total);
-		if( Success ) SwitchCommitSaveData();
+		{
+			std::string DestPath;
+			if( Success && ToPath(DestFile,DestPath) ) SwitchCommitSaveDataForPath(DestPath.c_str());
+		}
 #endif
 		return Success;
 	}
@@ -418,64 +440,58 @@ public:
 		if( EvenIfReadOnly&&Exists ) MakeWritable(ExistingD);
 		if( !Exists && (!RecoverPath(D,1,ExistingD,Ambiguous)||Ambiguous) ) return 0;
 #if defined(__SWITCH__)
+		// Horizon's rename cannot replace an existing file. Instead of
+		// deleting the destination first (which loses the previous savegame
+		// if the move then fails), park it as a backup and restore it on
+		// failure. Nothing is committed until the destination is complete.
 		SwitchLog("[SWITCH FILE] Move: Src='%s', Dest='%s', Replace=%d, Exists=%d\n", ExistingS.c_str(), ExistingD.c_str(), (int)Replace, (int)Exists);
+		std::string Backup;
 		if( Replace && Exists )
 		{
-			int un_rc = unlink(ExistingD.c_str());
-			SwitchLog("[SWITCH FILE] Move: unlink('%s') = %d (errno=%d)\n", ExistingD.c_str(), un_rc, errno);
-		}
-		int ren_rc = rename(ExistingS.c_str(), ExistingD.c_str());
-		SwitchLog("[SWITCH FILE] Move: rename('%s', '%s') = %d (errno=%d)\n", ExistingS.c_str(), ExistingD.c_str(), ren_rc, errno);
-		if( ren_rc == 0 )
-		{
-			SwitchCommitSaveData();
-			return 1;
-		}
-		SwitchLog("[SWITCH FILE] Move: rename failed, falling back to direct stream copy+delete...\n");
-		{
-			FILE* InStream = fopen(ExistingS.c_str(), "rb");
-			FILE* OutStream = fopen(ExistingD.c_str(), "wb");
-			if( !OutStream && Exists )
+			Backup = ExistingD + ".bak";
+			unlink(Backup.c_str());
+			if( rename(ExistingD.c_str(), Backup.c_str()) != 0 )
 			{
-				unlink(ExistingD.c_str());
-				OutStream = fopen(ExistingD.c_str(), "wb");
+				SwitchLog("[SWITCH FILE ERROR] Move: cannot park '%s' as backup (errno=%d)\n", ExistingD.c_str(), errno);
+				return 0;
 			}
+		}
+		UBOOL Moved = rename(ExistingS.c_str(), ExistingD.c_str())==0;
+		if( !Moved )
+		{
+			SwitchLog("[SWITCH FILE] Move: rename failed (errno=%d), falling back to stream copy\n", errno);
+			FILE* InStream = fopen(ExistingS.c_str(), "rb");
+			FILE* OutStream = InStream ? fopen(ExistingD.c_str(), "wb") : NULL;
 			if( InStream && OutStream )
 			{
 				char StreamBuf[65536];
 				size_t StreamRead = 0;
-				bool WriteOk = true;
+				Moved = 1;
 				while( (StreamRead = fread(StreamBuf, 1, sizeof(StreamBuf), InStream)) > 0 )
 				{
-					if( fwrite(StreamBuf, 1, StreamRead, OutStream) != StreamRead )
-					{
-						WriteOk = false;
-						break;
-					}
+					if( fwrite(StreamBuf, 1, StreamRead, OutStream) != StreamRead ) { Moved = 0; break; }
 				}
-				fclose(InStream);
-				fflush(OutStream);
-				fclose(OutStream);
-				if( WriteOk )
-				{
-					unlink(ExistingS.c_str());
-					SwitchLog("[SWITCH FILE] Move: Direct stream copy succeeded!\n");
-					SwitchCommitSaveData();
-					return 1;
-				}
-				SwitchLog("[SWITCH FILE ERROR] Direct stream copy encountered write failure!\n");
+				if( ferror(InStream) ) Moved = 0;
 			}
+			if( InStream ) fclose(InStream);
+			if( OutStream && fclose(OutStream) != 0 ) Moved = 0;
+			if( Moved )
+				unlink(ExistingS.c_str());
 			else
-			{
-				if( InStream ) fclose(InStream);
-				if( OutStream ) fclose(OutStream);
-				SwitchLog("[SWITCH FILE ERROR] Direct stream copy failed: In=%p, Out=%p, errno=%d\n", InStream, OutStream, errno);
-			}
+				unlink(ExistingD.c_str());
 		}
-		UBOOL MoveRes = Copy(Dest,Src,Replace,EvenIfReadOnly,Attributes,NULL)&&Delete(Src,1,1);
-		SwitchLog("[SWITCH FILE] Move: Copy+Delete result = %d\n", (int)MoveRes);
-		if( MoveRes ) SwitchCommitSaveData();
-		return MoveRes;
+		if( Moved )
+		{
+			if( !Backup.empty() )
+				unlink(Backup.c_str());
+		}
+		else if( !Backup.empty() )
+		{
+			rename(Backup.c_str(), ExistingD.c_str());
+			SwitchLog("[SWITCH FILE ERROR] Move failed; previous '%s' restored\n", ExistingD.c_str());
+		}
+		SwitchCommitSaveDataForPath(ExistingD.c_str());
+		return Moved;
 #else
 		if( Replace && Exists )
 			unlink(ExistingD.c_str());
@@ -493,7 +509,7 @@ public:
 		{
 #if defined(__SWITCH__)
 			SwitchLog("[SWITCH FILE] Delete: unlink('%s') succeeded\n", Path.c_str());
-			SwitchCommitSaveData();
+			SwitchCommitSaveDataForPath(Path.c_str());
 #endif
 			return 1;
 		}
@@ -504,7 +520,7 @@ public:
 		int un_rc = unlink(Recovered.c_str());
 #if defined(__SWITCH__)
 		SwitchLog("[SWITCH FILE] Delete: recovered unlink('%s') = %d (errno=%d)\n", Recovered.c_str(), un_rc, errno);
-		if( un_rc == 0 ) SwitchCommitSaveData();
+		if( un_rc == 0 ) SwitchCommitSaveDataForPath(Recovered.c_str());
 #endif
 		return un_rc==0 || (!RequireExists&&errno==ENOENT);
 	}
