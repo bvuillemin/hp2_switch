@@ -1008,6 +1008,10 @@ void UGameEngine::FixUpLevel( )
 // "Faster level loads" change). HP2_LOAD_FADE_SCALE=1 restores the original;
 // any value in (0, 10] is accepted.
 //
+#if defined(__SWITCH__)
+extern "C" long long GSwitchReadNs, GSwitchReadBytes, GSwitchReadCalls, GSwitchReadCacheBytes;
+#endif
+
 static FLOAT LoadFadeScale()
 {
 	static FLOAT Scale = -1.f;
@@ -1676,6 +1680,14 @@ ULevel* UGameEngine::LoadMap( const FURL& URL, UPendingLevel* Pending, const TMa
 	
 	debugf( TEXT("Load time %s: %f seconds total, %f app"), 
 		*URL.Map, appSeconds()-LoadTime[0], appProcessSeconds()-LoadTime[1] );
+#if defined(__SWITCH__)
+	{
+		// Cumulative file reads since boot (debug log only): splits load time
+		// between I/O and CPU.
+		SwitchLog( "[READ TOTAL] after %ls: %lld bytes in %lld reads, %.1f ms of I/O, %lld MB cached\n",
+			*URL.Map, GSwitchReadBytes, GSwitchReadCalls, GSwitchReadNs / 1e6, GSwitchReadCacheBytes >> 20 );
+	}
+#endif
 
 #if defined(__SWITCH__)
 	// Precache spell sounds and dialog incantations to eliminate spellcast hitching
@@ -1700,9 +1712,23 @@ ULevel* UGameEngine::LoadMap( const FURL& URL, UPendingLevel* Pending, const TMa
 		TEXT("HPSounds.Magic_sfx.cast_Expelliarmus"),
 		TEXT("HPSounds.magic_sfx.spell_hit")
 	};
-	for( INT s=0; s<ARRAY_COUNT(SpellSounds); s++ )
+	// Root them once: otherwise the garbage collection of the next LoadMap
+	// purges them and unloads AllDialog (94 MB), which is then reopened
+	// after every level change.
+	static UBOOL SpellSoundsRooted = 0;
+	if( !SpellSoundsRooted )
 	{
-		UObject::StaticLoadObject( USound::StaticClass(), NULL, SpellSounds[s], NULL, LOAD_NoWarn | LOAD_Quiet, NULL );
+		INT Rooted = 0;
+		for( INT s=0; s<ARRAY_COUNT(SpellSounds); s++ )
+		{
+			UObject* Sound = UObject::StaticLoadObject( USound::StaticClass(), NULL, SpellSounds[s], NULL, LOAD_NoWarn | LOAD_Quiet, NULL );
+			if( Sound )
+			{
+				Sound->AddToRoot();
+				++Rooted;
+			}
+		}
+		SpellSoundsRooted = Rooted > 0;
 	}
 #endif
 

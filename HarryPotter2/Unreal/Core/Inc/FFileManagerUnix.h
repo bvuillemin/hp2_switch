@@ -146,19 +146,40 @@ namespace
 }
 
 
+
 class FArchiveFileReaderUnix : public FArchive
 {
 public:
-	FArchiveFileReaderUnix( FILE* InFile, FOutputDevice* InError, off_t InSize )
+	FArchiveFileReaderUnix( FILE* InFile, FOutputDevice* InError, off_t InSize, const char* InPath=NULL )
 	: File(InFile), Error(InError ? InError : GNull), Size(InSize), Pos(0)
 	{
 		ArIsLoading = ArIsPersistent = 1;
+#if defined(__SWITCH__)
+		// Block cache. Every read on the RomFS is a filesystem IPC with a
+		// large fixed cost: the engine read the big packages almost entirely
+		// but in ~19,000 reads of ~6 KB, at 25 MB/s, where large reads reach
+		// 70+ MB/s. Each 512 KB block of the file is read once, in one call,
+		// and kept while the file is open; only blocks actually touched are
+		// read, so a mostly unused package (AllDialog) costs little.
+		setvbuf( File, NULL, _IONBF, 0 );
+		FilePos = 0;
+		NumBlocks = (INT)((Size + BlockSize - 1) / BlockSize);
+		Blocks = NumBlocks ? (BYTE**)std::calloc( NumBlocks, sizeof(BYTE*) ) : NULL;
+		// Read statistics for the debug log (see Close).
+		StatPath = (InPath && SwitchLogEnabled()) ? InPath : "";
+		StatNs = 0;
+		StatBytes = 0;
+		StatCalls = 0;
+		StatOpenNs = NowNs();
+#endif
 	}
 	~FArchiveFileReaderUnix() { if( File ) Close(); }
 	void Seek( INT InPos )
 	{
 		if( InPos < 0 || (off_t)InPos > Size ) { Fail(TEXT("Invalid file-reader seek")); return; }
+#if !defined(__SWITCH__)
 		if( fseeko(File,(off_t)InPos,SEEK_SET) != 0 ) { Fail(TEXT("POSIX file-reader seek failed")); return; }
+#endif
 		Pos = (off_t)InPos;
 	}
 	INT Tell() { return Narrow(Pos,TEXT("File-reader position exceeds the archive INT range")); }
@@ -167,6 +188,18 @@ public:
 	{
 		if( File )
 		{
+#if defined(__SWITCH__)
+			if( !StatPath.empty() && StatCalls )
+				SwitchLog( "[READ] %s size=%lld read=%lld calls=%d io=%.1fms open=%.1fms\n",
+					StatPath.c_str(), (long long)Size, StatBytes, StatCalls,
+					StatNs / 1e6, (NowNs() - StatOpenNs) / 1e6 );
+#endif
+#if defined(__SWITCH__)
+			DropBlocks( INDEX_NONE );
+			std::free( Blocks );
+			Blocks = NULL;
+			NumBlocks = 0;
+#endif
 			if( fclose(File) != 0 ) Fail(TEXT("POSIX file-reader close failed"));
 			File = NULL;
 		}
@@ -179,9 +212,23 @@ public:
 			{ Fail(TEXT("File-reader request exceeds the archive INT range")); return; }
 		if( Pos+(off_t)Length > Size ) { Fail(TEXT("File-reader request extends beyond end of file")); return; }
 		if( Length == 0 ) return;
+#if defined(__SWITCH__)
+		BYTE* Dest = (BYTE*)V;
+		while( Length > 0 )
+		{
+			const INT Index = (INT)(Pos / BlockSize);
+			BYTE* Block = GetBlock( Index );
+			if( !Block ) return;
+			const INT Offset = (INT)(Pos - (off_t)Index * BlockSize);
+			const INT Copy = Min( Length, BlockBytes( Index ) - Offset );
+			appMemcpy( Dest, Block + Offset, Copy );
+			Dest += Copy; Pos += Copy; Length -= Copy;
+		}
+#else
 		size_t Done = fread(V,1,(size_t)Length,File);
 		Pos += (off_t)Done;
 		if( Done != (size_t)Length ) Fail(ferror(File) ? TEXT("POSIX file-reader read failed") : TEXT("Unexpected end of file"));
+#endif
 	}
 	FArchive& operator<<( FName& Name )
 	{
@@ -226,6 +273,76 @@ private:
 		ArIsError = 1;
 		if( Error ) Error->Logf(TEXT("%s (errno=%i)"),Message,errno);
 	}
+#if defined(__SWITCH__)
+	static long long NowNs()
+	{
+		struct timespec Ts;
+		clock_gettime( CLOCK_MONOTONIC, &Ts );
+		return (long long)Ts.tv_sec * 1000000000LL + Ts.tv_nsec;
+	}
+	// Reads Count bytes at At, returning the failure reason or NULL.
+	const TCHAR* RawRead( off_t At, BYTE* Dest, INT Count )
+	{
+		const long long StartNs = StatPath.empty() ? 0 : NowNs();
+		if( FilePos != At )
+		{
+			if( fseeko(File,At,SEEK_SET) != 0 ) { FilePos = -1; return TEXT("POSIX file-reader seek failed"); }
+			FilePos = At;
+		}
+		const size_t Done = fread(Dest,1,(size_t)Count,File);
+		FilePos += (off_t)Done;
+		if( Done != (size_t)Count )
+		{
+			FilePos = -1;
+			return ferror(File) ? TEXT("POSIX file-reader read failed") : TEXT("Unexpected end of file");
+		}
+		if( !StatPath.empty() )
+		{
+			const long long Elapsed = NowNs() - StartNs;
+			StatNs += Elapsed; StatBytes += Count; ++StatCalls;
+			GSwitchReadNs += Elapsed; GSwitchReadBytes += Count; ++GSwitchReadCalls;
+		}
+		return NULL;
+	}
+	enum { BlockSize = 512 * 1024 };
+	// Cap on the bytes held by all block caches together; past it, a reader
+	// that needs a new block first releases the blocks it already holds.
+	static constexpr long long MaxCacheBytes = 384LL * 1024 * 1024;
+	INT BlockBytes( INT Index ) const
+	{
+		return (INT)Min( (off_t)BlockSize, Size - (off_t)Index * BlockSize );
+	}
+	BYTE* GetBlock( INT Index )
+	{
+		if( Index < 0 || Index >= NumBlocks || !Blocks ) { Fail(TEXT("File-reader block out of range")); return NULL; }
+		if( Blocks[Index] ) return Blocks[Index];
+		const INT Bytes = BlockBytes( Index );
+		if( GSwitchReadCacheBytes + Bytes > MaxCacheBytes )
+			DropBlocks( Index );
+		BYTE* Block = (BYTE*)std::malloc( Bytes );
+		if( !Block ) { Fail(TEXT("File-reader block allocation failed")); return NULL; }
+		if( const TCHAR* Err = RawRead( (off_t)Index * BlockSize, Block, Bytes ) ) { std::free( Block ); Fail( Err ); return NULL; }
+		Blocks[Index] = Block;
+		GSwitchReadCacheBytes += Bytes;
+		return Block;
+	}
+	void DropBlocks( INT Keep )
+	{
+		for( INT i = 0; i < NumBlocks; ++i )
+		{
+			if( i == Keep || !Blocks[i] ) continue;
+			std::free( Blocks[i] );
+			Blocks[i] = NULL;
+			GSwitchReadCacheBytes -= BlockBytes( i );
+		}
+	}
+	std::string StatPath;
+	long long StatNs, StatBytes, StatOpenNs;
+	INT StatCalls;
+	BYTE** Blocks;
+	INT NumBlocks;
+	off_t FilePos;
+#endif
 	FILE* File;
 	FOutputDevice* Error;
 	off_t Size;
@@ -333,7 +450,7 @@ public:
 		off_t Size=ftello(File);
 		if( Size < 0 || Size > (off_t)MAXINT || fseeko(File,0,SEEK_SET) != 0 )
 			{ fclose(File); return ReaderFailure(Filename,Flags,Error,TEXT("File exceeds the archive INT contract")); }
-		return new(TEXT("UnixFileReader")) FArchiveFileReaderUnix(File,Error,Size);
+		return new(TEXT("UnixFileReader")) FArchiveFileReaderUnix(File,Error,Size,Path.c_str());
 	}
 	FArchive* CreateFileWriter( const TCHAR* Filename, DWORD Flags=0, FOutputDevice* Error=GNull )
 	{
