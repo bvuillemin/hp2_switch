@@ -15,7 +15,7 @@ import sys
 DEFAULT_TITLE_ID = "0100485032000000"
 TITLE_NAME = "Harry Potter and the Chamber of Secrets"
 PUBLISHER_NAME = "EA Games"
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.3.0"
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 PACKAGING_DIR = os.path.join(REPO_ROOT, "packaging", "nsp")
@@ -34,8 +34,6 @@ def find_hacbrewpack(custom_path=None):
         os.path.join(REPO_ROOT, "tools", "hacbrewpack.exe"),
         os.path.join(REPO_ROOT, "tools", "hacbrewpack"),
         os.path.join(REPO_ROOT, "hacbrewpack.exe"),
-        r"D:\ROMS\Carafe\hacbrewpack.exe",
-        r"C:\tools\hacbrewpack.exe",
     ]
     for c in candidates:
         if os.path.isfile(c):
@@ -310,7 +308,7 @@ def main():
 
     # Rename output NSP to friendly title
     raw_nsp = os.path.join(out_dir, f"{args.titleid}.nsp")
-    pretty_nsp = os.path.join(out_dir, f"Harry Potter and the Chamber of Secrets [{args.titleid}][v0].nsp")
+    pretty_nsp = os.path.join(out_dir, f"Harry Potter and the Chamber of Secrets [{args.titleid}][v0] ({APP_VERSION}).nsp")
     if os.path.isfile(raw_nsp):
         if os.path.isfile(pretty_nsp):
             os.remove(pretty_nsp)
