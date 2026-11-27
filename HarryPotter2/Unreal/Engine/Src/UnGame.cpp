@@ -29,6 +29,9 @@ IMPLEMENT_CLASS(UGameEngine);
 	cleanup!!
 -----------------------------------------------------------------------------*/
 
+// Set while LoadMap draws the loading screen (see UGameEngine::Draw).
+static UBOOL GDrawingLoadingScreen = 0;
+
 void UGameEngine::PaintProgress()
 {
 	guard(PaintProgress);
@@ -1074,7 +1077,13 @@ ULevel* UGameEngine::LoadMap( const FURL& URL, UPendingLevel* Pending, const TMa
 		}
 
 		Viewport->Actor->FlashFog.W = 0.f;
+		GDrawingLoadingScreen = 1;
 		Draw( Viewport );
+		GDrawingLoadingScreen = 0;
+		// Local test helper (see AutoShotTick in SDLLaunch.cpp): capture the
+		// loading screen as drawn.
+		if( getenv( "HP2_SHOT_LOADING" ) )
+			Viewport->Exec( TEXT("SHOT"), *GLog );
 
 		if( Audio )
 			Audio->SetViewport( Audio->GetViewport() );
@@ -1908,6 +1917,36 @@ void UGameEngine::Draw( UViewport* Viewport, UBOOL Blit, BYTE* HitData, INT* Hit
 			const FLOAT UIHeight = Min(SavedClipY,480.f*Scale);
 			const FLOAT OffsetX = Max(0.f,(SavedClipX-UIWidth)*0.5f);
 			const FLOAT OffsetY = Max(0.f,(SavedClipY-UIHeight)*0.5f);
+			// The pause/menu and loading screens are 4:3 pages centred in the
+			// UI area; on a widescreen display the frozen world showed through
+			// on both sides. Black out what lies outside the UI area while one
+			// of those screens is up (gameplay HUD keeps the world visible).
+			{
+				APlayerPawn* ViewActor = Viewport->Actor;
+				ALevelInfo* Info = (ViewActor && ViewActor->Level) ? ViewActor->Level : NULL;
+				// bShowLoadingScreen is not usable here: it stays set during
+				// play in some levels. GDrawingLoadingScreen marks the frame
+				// LoadMap draws as the loading screen.
+				const UBOOL FullScreenPage = ViewActor && ( ViewActor->bShowMenu || GDrawingLoadingScreen
+					|| (Info && (Info->Pauser != TEXT("") || Info->LevelAction != LEVACT_None)) );
+				UTexture* Fill = Info ? Info->DefaultTexture : NULL;
+				if( FullScreenPage && Fill && (OffsetX > 0.f || OffsetY > 0.f) )
+				{
+					const FPlane Black( 0.f, 0.f, 0.f, 1.f );
+					const FPlane NoFog( 0.f, 0.f, 0.f, 0.f );
+					const FLOAT X0 = Canvas->OrgX, Y0 = Canvas->OrgY;
+					if( OffsetX > 0.f )
+					{
+						Canvas->DrawTile( Fill, X0, Y0, OffsetX, SavedClipY, 0, 0, 1, 1, NULL, 1.f, Black, NoFog, PF_TwoSided );
+						Canvas->DrawTile( Fill, X0 + OffsetX + UIWidth, Y0, SavedClipX - OffsetX - UIWidth, SavedClipY, 0, 0, 1, 1, NULL, 1.f, Black, NoFog, PF_TwoSided );
+					}
+					if( OffsetY > 0.f )
+					{
+						Canvas->DrawTile( Fill, X0, Y0, SavedClipX, OffsetY, 0, 0, 1, 1, NULL, 1.f, Black, NoFog, PF_TwoSided );
+						Canvas->DrawTile( Fill, X0, Y0 + OffsetY + UIHeight, SavedClipX, SavedClipY - OffsetY - UIHeight, 0, 0, 1, 1, NULL, 1.f, Black, NoFog, PF_TwoSided );
+					}
+				}
+			}
 			Canvas->OrgX += OffsetX;
 			Canvas->OrgY += OffsetY;
 			Canvas->ClipX = UIWidth;
